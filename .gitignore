@@ -2,7 +2,7 @@
 .env
 
 service_credentials.json
-
+credentials.json
 # Python bytecode
 *.pyc
 __pycache__/
