@@ -1,9 +1,9 @@
 # Environment files
 .env
 
-/service_credentials.json
-/credentials.json
-/token.json
+service_credentials.json
+credentials.json
+token.json
 # Python bytecode
 *.pyc
 __pycache__/
