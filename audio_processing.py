@@ -1,8 +1,8 @@
 from pydub import AudioSegment, silence
 import io
 import gc
-import time  # Import time module for timing functions
-from datetime import datetime  # Import for date parsing
+import time 
+from datetime import datetime 
 from decouple import config
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -59,19 +59,6 @@ def download_file(file_id):
     print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
     return AudioSegment.from_file(output)
 
-# Function to ensure the audio file is in WAV format
-def ensure_wav_format(audio_segment, file_extension):
-    start_time = time.time()
-    if file_extension.lower() != "wav":
-        wav_output = io.BytesIO()
-        audio_segment.export(wav_output, format="wav")
-        wav_output.seek(0)
-        end_time = time.time()
-        print(f"Time taken to convert to WAV format: {end_time - start_time:.2f} seconds")
-        return AudioSegment.from_wav(wav_output)
-    end_time = time.time()
-    print(f"Time taken to check WAV format: {end_time - start_time:.2f} seconds")
-    return audio_segment
 
 # Function to list files in a Google Drive folder and return their IDs
 def get_file_ids_from_folder(folder_id):
@@ -116,7 +103,7 @@ def process_audio_files(folder_id, output_folder_id, start_jingle_wav, end_jingl
     # Process each show file
     for name, show_id in file_ids.items():
         file_extension = name.split('.')[-1]
-        if file_extension.lower() in ('wav', 'mp3', 'ogg', 'flac'):
+        if file_extension.lower() in ('wav', 'mp3'):
             try:
                 start_time = time.time()
                 date_str = name[:8]
@@ -149,7 +136,7 @@ def process_audio_files(folder_id, output_folder_id, start_jingle_wav, end_jingl
                         end_jingle_wav[7200:]
                     )
 
-                    output_filename = f"final_show_with_jingle_{name}"
+                    output_filename = f"{name}_EDITED"
                     upload_to_drive(final_output, output_filename, day_folder_id, timestamp)
 
                     del show, trimmed_show, final_output
@@ -172,9 +159,5 @@ end_jingle_id = config('END_JINGLE_ID')
 start_jingle = download_file(start_jingle_id)
 end_jingle = download_file(end_jingle_id)
 
-# Ensure jingles are in WAV format once before processing audio files
-start_jingle_wav = ensure_wav_format(start_jingle, "wav")
-end_jingle_wav = ensure_wav_format(end_jingle, "wav")
-
 # Process audio files from the specified folder and output to the target folder, passing jingles
-process_audio_files(folder_id, output_folder_id, start_jingle_wav, end_jingle_wav)
+process_audio_files(folder_id, output_folder_id, start_jingle, end_jingle)
