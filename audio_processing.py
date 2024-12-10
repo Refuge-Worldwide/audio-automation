@@ -7,13 +7,31 @@ from decouple import config
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
+from dotenv import load_dotenv
+import os
+import contentful_management
+import requests
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Set up authentication using service account credentials
 SCOPES = ['https://www.googleapis.com/auth/drive']
-SERVICE_ACCOUNT_FILE = 'service_credentials.json'
+CLIENT_EMAIL = os.getenv('GOOGLE_DRIVE_CLIENT_EMAIL')
+PRIVATE_KEY = os.getenv('GOOGLE_DRIVE_PRIVATE_KEY').replace('\\n', '\n')
+CONTENTFUL_SPACE_ID = os.getenv('CONTENTFUL_SPACE_ID')
+CONTENTFUL_ENV_ID = os.getenv('CONTENTFUL_ENV_ID')
+CONTENTFUL_MANAGEMENT_API_TOKEN = os.getenv('CONTENTFUL_MANAGEMENT_API_TOKEN')
 
-credentials = service_account.Credentials.from_service_account_file(
-    SERVICE_ACCOUNT_FILE, scopes=SCOPES)
+credentials = service_account.Credentials.from_service_account_info(
+    {
+        "type": "service_account",
+        "client_email": CLIENT_EMAIL,
+        "private_key": PRIVATE_KEY,
+        "token_uri": "https://oauth2.googleapis.com/token"
+    },
+    scopes=SCOPES
+)
 
 service = build('drive', 'v3', credentials=credentials)
 
@@ -146,6 +164,27 @@ def process_audio_files(folder_id, output_folder_id, start_jingle_wav, end_jingl
 
         end_time = time.time()
         print(f"Total time taken to process files: {end_time - start_time:.2f} seconds")
+
+# Function to get the show based on timestamp
+def get_show_from_timestamp(timestamp):
+    try:
+        api_key = os.getenv('WEBSITE_API_KEY')
+        headers = {'Authorization': f'Bearer {api_key}'}
+        response = requests.get(f"https://refugeworldwide.com/api/shows/by-timestamp?t={timestamp}", headers=headers)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        show = response.json()  # Parse the JSON response
+        return show
+    except requests.RequestException as e:
+        print(f"Error fetching show for timestamp {timestamp}: {e}")
+        return None
+
+# Function to update the SoundCloud link for a show in Contentful
+def update_show_sc_link(entry_id, sc_link):
+    client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
+    entry = client.entries('contentful_space_id', 'contentful_environment_id').find('entry_id')
+
+    entry.update({'fields': {'mixcloudLink': {'en-US': sc_link}}})
+    print(f"Updated SoundCloud link for show with ID: {entry_id}")
 
 # Folder IDs for the shows and the output folder
 folder_id = config('FOLDER_ID')
