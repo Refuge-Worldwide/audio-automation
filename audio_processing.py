@@ -44,7 +44,7 @@ def create_or_get_folder(folder_name, parent_id):
 
 # Function to download a file by its ID and return as AudioSegment
 def download_file(file_id):
-    start_time = time.time()
+    start_time = time.time()  # Start timing
     request = service.files().get_media(fileId=file_id)
     output = io.BytesIO()
     downloader = MediaIoBaseDownload(output, request)
@@ -54,9 +54,9 @@ def download_file(file_id):
         status, done = downloader.next_chunk()
         print(f"Downloaded {int(status.progress() * 100)}%.")
 
-    output.seek(0)
-    end_time = time.time()
-    print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
+    output.seek(0)  # Go back to the start of the BytesIO object
+    end_time = time.time()  # End timing
+    print(f"Time taken to download file: {end_time - start_time:.2f} seconds")  # Print elapsed time
     return AudioSegment.from_file(output)
 
 
