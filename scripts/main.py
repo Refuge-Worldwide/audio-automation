@@ -1,5 +1,5 @@
 print("Attempting to import audio_utils and pydub...")
-from audio_utils import process_audio_files
+from audio_utils import process_audio_files, download_file
 print("Attempting to import audio_utils and pydub...")
 from upload_utils import get_drive_service
 print("Attempting to import audio_utils and pydub...")
@@ -7,23 +7,7 @@ from pydub import AudioSegment
 print("Attempting to import audio_utils and pydub...")
 
 import os
-import sys
-import os
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-
-def load_jingles():
-    """Load the start and end jingles from the local file system."""
-    start_jingle_path = os.getenv('START_JINGLE_PATH', 'start_jingle.mp3')
-    end_jingle_path = os.getenv('END_JINGLE_PATH', 'end_jingle.mp3')
-
-    if not os.path.exists(start_jingle_path) or not os.path.exists(end_jingle_path):
-        raise FileNotFoundError("Ensure the start and end jingles exist in the specified paths.")
-    
-    start_jingle = AudioSegment.from_file(start_jingle_path)
-    end_jingle = AudioSegment.from_file(end_jingle_path)
-
-    return start_jingle, end_jingle
 
 def main():
     """Coordinate the entire audio processing and upload pipeline."""
@@ -39,7 +23,7 @@ def main():
             raise ValueError("Ensure INPUT_FOLDER_ID and OUTPUT_FOLDER_ID are set in environment variables.")
 
         # Load jingles
-        start_jingle, end_jingle = load_jingles()
+        start_jingle, end_jingle = download_file(drive_service, os.getenv('START_JINGLE_ID')),  download_file(drive_service, os.getenv('END_JINGLE_ID'))
 
         # Process audio files and upload results
         process_audio_files(

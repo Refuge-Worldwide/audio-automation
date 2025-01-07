@@ -6,6 +6,8 @@ import os
 import requests
 from datetime import datetime, timedelta
 import psycopg2
+from dotenv import load_dotenv
+load_dotenv()
 
 # Load environment variables
 SCOPES = ['https://www.googleapis.com/auth/drive']
