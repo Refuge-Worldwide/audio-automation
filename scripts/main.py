@@ -1,10 +1,9 @@
-print("Attempting to import audio_utils and pydub...")
+
 from audio_utils import process_audio_files, download_file
-print("Attempting to import audio_utils and pydub...")
+
 from upload_utils import get_drive_service
-print("Attempting to import audio_utils and pydub...")
+
 from pydub import AudioSegment
-print("Attempting to import audio_utils and pydub...")
 
 import os
 
