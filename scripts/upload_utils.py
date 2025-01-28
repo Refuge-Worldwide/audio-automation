@@ -5,13 +5,19 @@ import io
 import os
 import requests
 from datetime import datetime, timedelta
-import psycopg2
 from dotenv import load_dotenv
+from supabase import create_client, Client
+
+
 load_dotenv()
+
+url: str = os.getenv("SUPABASE_URL")
+key: str = os.getenv("SUPABASE_TOKEN")
+supabase: Client = create_client(url, key)
 
 # Load environment variables
 SCOPES = ['https://www.googleapis.com/auth/drive']
-SUPABASE_URL = "https://oviucrnsbztpafeijwbt.supabase.co"
+SUPABASE_URL = os.getenv("SUPABASE_URL")
 
 def get_drive_service():
     """Authenticate and return a Google Drive service instance."""
@@ -26,50 +32,58 @@ def get_drive_service():
     )
     return build('drive', 'v3', credentials=credentials)
 
+
 def get_soundcloud_token():
-    """Fetch the SoundCloud token and refresh it if expired."""
-    conn = psycopg2.connect(
-        host=SUPABASE_URL,
-        dbname="postgres",
-        user="postgres",
-        password=os.getenv("SUPABASE_TOKEN"),
-        port=5432
-    )
+    """Retrieve a valid SoundCloud OAuth token, refreshing if expired."""
+    # Retrieve the access token and refresh token (stored securely)
+    access_token = os.getenv("SC_ACCESS_TOKEN")
+    refresh_token = os.getenv("SC_REFRESH_TOKEN")
+    expires_at = datetime.now() + timedelta(seconds=3599)
 
-    with conn.cursor() as cur:
-        cur.execute("SELECT token, refresh_token, expires FROM accessTokens WHERE application = 'soundcloud' LIMIT 1;")
-        result = cur.fetchone()
-        token, refresh_token, expires = result
-        now = datetime.now()
+    # If the access token has expired, refresh it
+    if datetime.now() >= expires_at:
+        print("Access token expired, refreshing...")
+        refresh_url = "https://api.soundcloud.com/oauth2/token"
+        data = {
+            "grant_type": "refresh_token",
+            "client_id": os.getenv("SC_CLIENT_ID"),
+            "client_secret": os.getenv("SC_CLIENT_SECRET"),
+            "refresh_token": refresh_token
+        }
+        response = requests.post(refresh_url, data=data)
 
-        if now >= expires:
-            response = requests.post(
-                "https://api.soundcloud.com/oauth2/token",
-                data={
-                    "client_id": os.getenv("SC_CLIENT_ID"),
-                    "client_secret": os.getenv("SC_CLIENT_SECRET"),
-                    "grant_type": "refresh_token",
-                    "refresh_token": refresh_token
-                }
-            )
-            response.raise_for_status()
-            data = response.json()
+        if response.status_code == 200:
+            new_tokens = response.json()
+            access_token = new_tokens["access_token"]
+            refresh_token = new_tokens["refresh_token"]
+            expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"])
 
-            cur.execute(
-                """UPDATE accessTokens
-                SET token = %s, refresh_token = %s, expires = %s
-                WHERE application = 'soundcloud';""",
-                (data['access_token'], data['refresh_token'], datetime.now() + timedelta(seconds=data['expires_in']))
-            )
-            conn.commit()
+            # Save the new access token and expiration time (you may store it in DB or environment)
+            os.environ["SOUNDCLOUD_ACCESS_TOKEN"] = access_token
+            os.environ["SOUNDCLOUD_REFRESH_TOKEN"] = refresh_token
+            os.environ["TOKEN_EXPIRATION_TIME"] = str(int(expires_at.timestamp()))
+            print(f"New access token obtained: {access_token}")
+        else:
+            print("Failed to refresh access token")
+            return None
 
-            return data['access_token']
-        return token
+    return access_token
 
-def upload_to_soundcloud(audio_file_path, title, description):
+def upload_to_soundcloud(audio_segment, title, description):
     """Upload audio to SoundCloud."""
-    token = get_soundcloud_token()
-    with open(audio_file_path, 'rb') as audio_file:
+    import json
+
+    try:
+        # Convert the AudioSegment to a BytesIO object
+        audio_file = io.BytesIO()
+        audio_segment.export(audio_file, format="mp3", bitrate="192k")
+        audio_file.seek(0)  # Reset file pointer
+
+        # Get the SoundCloud token
+        token = get_soundcloud_token()
+        print(f"Using token: {token}")
+
+        # Send the POST request to SoundCloud with the token in the Authorization header
         response = requests.post(
             "https://api.soundcloud.com/tracks",
             headers={"Authorization": f"OAuth {token}"},
@@ -81,9 +95,21 @@ def upload_to_soundcloud(audio_file_path, title, description):
                 "track[downloadable]": "true"
             }
         )
+
+        # Print response for debugging
+        print(f"Response status code: {response.status_code}")
+        print(f"Response text: {response.text}")
+
+        # Raise an exception if the request failed
         response.raise_for_status()
+
+        # Get the response data and return the permalink
         data = response.json()
         return data['permalink_url']
+
+    except requests.exceptions.RequestException as e:
+        print(f"Error uploading to SoundCloud: {e}")
+        raise
 
 def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     """Upload an audio file to Google Drive."""
@@ -99,3 +125,9 @@ def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
 
     media = MediaIoBaseUpload(file_stream, mimetype='audio/mp3', resumable=True)
     service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+if __name__ == "__main__":
+    token = get_soundcloud_token()
+    if token:
+        print("SoundCloud Token:", token)
+    else:
+        print("Failed to obtain a valid token.")

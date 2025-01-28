@@ -17,14 +17,21 @@ def download_file(service, file_id):
     done = False
     while not done:
         status, done = downloader.next_chunk()
-        print(f"Downloaded {int(status.progress() * 100)}%.")
+        print(f"Downloaded {int(status.progress() * 100)}%")
+        if done:
+            print("Download complete.")
+        else:
+            print("Downloading...")
 
-    output.seek(0)
+    output.seek(0)  # Ensure file pointer is at the beginning after download
+    file_size = len(output.getvalue())  # Get the size of the downloaded file
+    print(f"Downloaded file size: {file_size} bytes")
+
     end_time = time.time()
     print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
     return AudioSegment.from_file(output)
 
-def process_audio_files(service, folder_id, output_folder_id, start_jingle, end_jingle):
+def process_audio_files(service, folder_id, start_jingle, end_jingle):
     """Process audio files from the given folder."""
     def get_file_ids_from_folder(service, folder_id):
         query = f"'{folder_id}' in parents"
@@ -45,7 +52,8 @@ def process_audio_files(service, folder_id, output_folder_id, start_jingle, end_
                 folder_name = date.strftime('%d %b')
 
                 show = download_file(service, show_id)
-                if len(show) > 13000:
+                print("beginning to process audio")
+                if len(show) > 1800000:
                     start_trim = silence.detect_leading_silence(show)
                     end_trim = silence.detect_leading_silence(show.reverse())
                     trimmed_show = show[start_trim:len(show) - end_trim]
@@ -66,10 +74,9 @@ def process_audio_files(service, folder_id, output_folder_id, start_jingle, end_
                         end_jingle[7200:]
                     )
 
-                    output_filename = f"{name}_EDITED.mp3"
-                    upload_to_drive(service, final_output, output_filename, output_folder_id, timestamp)
+                    print("finished to process audio")
 
-                    sc_link = upload_to_soundcloud(output_filename, f"Show: {name}", "Automatically processed show")
+                    sc_link = upload_to_soundcloud(final_output, f"Show: {name}", "Automatically processed show")
                     print(f"SoundCloud link: {sc_link}")
 
                     del show, trimmed_show, final_output
