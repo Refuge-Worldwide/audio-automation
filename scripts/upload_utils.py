@@ -7,6 +7,8 @@ import requests
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from supabase import create_client, Client
+import contentful_management
+import requests
 
 
 load_dotenv()
@@ -14,6 +16,10 @@ load_dotenv()
 url: str = os.getenv("SUPABASE_URL")
 key: str = os.getenv("SUPABASE_TOKEN")
 supabase: Client = create_client(url, key)
+
+CONTENTFUL_SPACE_ID = os.getenv('CONTENTFUL_SPACE_ID')
+CONTENTFUL_ENV_ID = os.getenv('CONTENTFUL_ENV_ID')
+CONTENTFUL_MANAGEMENT_API_TOKEN = os.getenv('CONTENTFUL_MANAGEMENT_API_TOKEN')
 
 # Load environment variables
 SCOPES = ['https://www.googleapis.com/auth/drive']
@@ -59,8 +65,8 @@ def get_soundcloud_token():
             expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"])
 
             # Save the new access token and expiration time (you may store it in DB or environment)
-            os.environ["SOUNDCLOUD_ACCESS_TOKEN"] = access_token
-            os.environ["SOUNDCLOUD_REFRESH_TOKEN"] = refresh_token
+            os.environ["SC_ACCESS_TOKEN"] = access_token
+            os.environ["SC_REFRESH_TOKEN"] = refresh_token
             os.environ["TOKEN_EXPIRATION_TIME"] = str(int(expires_at.timestamp()))
             print(f"New access token obtained: {access_token}")
         else:
@@ -111,6 +117,59 @@ def upload_to_soundcloud(audio_segment, title, description):
         print(f"Error uploading to SoundCloud: {e}")
         raise
 
+# Function to update the SoundCloud link for a show in Contentful
+def update_show_sc_link(entry_id, sc_link):
+    client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
+    space = client.spaces().find(CONTENTFUL_SPACE_ID)
+    environment = space.environments().find(CONTENTFUL_ENV_ID)
+
+    entry = environment.entries().find(entry_id)
+    entry.fields('en-US')['mixcloudLink'] = sc_link
+    entry.save()
+    entry.publish()
+    print(f"SoundCloud link updated for entry ID {entry_id}.")
+
+
+def get_show_from_timestamp(timestamp):
+    try:
+        api_key = os.getenv('WEBSITE_API_KEY')
+        headers = {'Authorization': f'Bearer {api_key}'}
+        response = requests.get(f"https://refugeworldwide.com/api/shows/by-timestamp?t={timestamp}", headers=headers)
+        response.raise_for_status()  # Raise an exception for HTTP errors
+        show = response.json()  # Parse the JSON response
+        return show
+    except requests.RequestException as e:
+        print(f"Error fetching show for timestamp {timestamp}: {e}")
+        return None
+    
+def fetch_show_details_from_contentful(timestamp):
+    show = get_show_from_timestamp(timestamp)
+    if show:
+        show_name = show.fields('en-US').get('name', 'Unknown Show')
+        show_description = show.fields('en-US').get('description', 'No description available.')
+        show_image = show.fields('en-US').get('image', {}).get('url', None)
+        return show_name, show_description, show_image
+    return None, None, None
+
+def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
+    """Upload audio to SoundCloud with metadata and update Contentful."""
+    show_metadata = fetch_show_details_from_contentful(timestamp)
+
+    if not show_metadata:
+        print(f"No metadata found for timestamp: {timestamp}")
+        return
+
+    title = show_metadata['title']
+    description = show_metadata['description']
+    entry_id = show_metadata['entry_id']
+
+    # Upload to SoundCloud
+    sc_link = upload_to_soundcloud(audio_segment, title, description)
+
+    # Update Contentful entry with SoundCloud link
+    update_show_sc_link(entry_id, sc_link)
+    print(f"SoundCloud link updated in Contentful for entry {entry_id}")
+
 def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     """Upload an audio file to Google Drive."""
     file_stream = io.BytesIO()
@@ -125,9 +184,12 @@ def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
 
     media = MediaIoBaseUpload(file_stream, mimetype='audio/mp3', resumable=True)
     service.files().create(body=file_metadata, media_body=media, fields='id').execute()
-if __name__ == "__main__":
-    token = get_soundcloud_token()
-    if token:
-        print("SoundCloud Token:", token)
-    else:
-        print("Failed to obtain a valid token.")
+
+
+# if __name__ == "__main__":
+#     response = get_show_fields()
+#     if response:
+#         print("SoundCloud Token:", response)
+#     else:
+#         print("Failed to obtain a valid token.")
+

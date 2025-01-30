@@ -24,7 +24,6 @@ def main():
         process_audio_files(
             service=drive_service,
             folder_id=input_folder_id,
-            output_folder_id=output_folder_id,
             start_jingle=start_jingle,
             end_jingle=end_jingle
         )
