@@ -116,7 +116,7 @@ def upload_to_soundcloud(audio_segment, title, description):
         return data['permalink_url']
 
     except requests.exceptions.RequestException as e:
-        error_message = "Error uploading to SoundCloud: {e}"
+        error_message = f"Error uploading to SoundCloud: {e}"
         send_error_to_slack(error_message)
         print(error_message)
         raise
@@ -149,7 +149,7 @@ def get_show_from_timestamp(timestamp):
         show = response.json()  # Parse the JSON response
         return show
     except requests.RequestException as e:
-        error_message = "Error fetching show for timestamp {timestamp}: {e}"
+        error_message = f"Error fetching show for timestamp {timestamp}: {e}"
         print(error_message)
         send_error_to_slack(error_message)
         return None

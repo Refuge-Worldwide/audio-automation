@@ -86,7 +86,7 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                     del show, trimmed_show, final_output
                     gc.collect()
             except Exception as e:
-                error_message = "Error processing audio {name}: {e}"
+                error_message = f"Error processing audio {name}: {e}"
                 send_error_to_slack(error_message)
                 print(error_message)
                 
