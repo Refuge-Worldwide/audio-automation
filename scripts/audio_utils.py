@@ -6,10 +6,12 @@ from datetime import datetime
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from upload_utils import get_show_from_timestamp, upload_to_soundcloud_with_metadata  # Import from the upload script
-
+from error_handling import send_error_to_slack
 
 def download_file(service, file_id):
     """Download a file by its ID and return as an AudioSegment."""
+
+    # TODO: Add error handling to this function. Perhaps a timeout for downloading.
     start_time = time.time()
     request = service.files().get_media(fileId=file_id)
     output = io.BytesIO()
@@ -84,7 +86,11 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                     del show, trimmed_show, final_output
                     gc.collect()
             except Exception as e:
-                print(f"Error processing {name}: {e}")
+                error_message = "Error processing audio {name}: {e}"
+                send_error_to_slack(error_message)
+                print(error_message)
+                
+                # TODO: Add retry logic
                 continue
 
             end_time = time.time()
