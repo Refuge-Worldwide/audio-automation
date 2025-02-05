@@ -9,7 +9,7 @@ from dotenv import load_dotenv
 from supabase import create_client, Client
 import contentful_management
 import requests
-
+from error_handling import send_error_to_slack
 
 load_dotenv()
 
@@ -70,7 +70,9 @@ def get_soundcloud_token():
             os.environ["TOKEN_EXPIRATION_TIME"] = str(int(expires_at.timestamp()))
             print(f"New access token obtained: {access_token}")
         else:
-            print("Failed to refresh access token")
+            error_message = "Failed to refresh access token"
+            print(error_message)
+            send_error_to_slack(error_message)
             return None
 
     return access_token
@@ -114,20 +116,28 @@ def upload_to_soundcloud(audio_segment, title, description):
         return data['permalink_url']
 
     except requests.exceptions.RequestException as e:
-        print(f"Error uploading to SoundCloud: {e}")
+        error_message = "Error uploading to SoundCloud: {e}"
+        send_error_to_slack(error_message)
+        print(error_message)
         raise
 
 # Function to update the SoundCloud link for a show in Contentful
 def update_show_sc_link(entry_id, sc_link):
-    client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
-    space = client.spaces().find(CONTENTFUL_SPACE_ID)
-    environment = space.environments().find(CONTENTFUL_ENV_ID)
+    try: 
+        client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
+        space = client.spaces().find(CONTENTFUL_SPACE_ID)
+        environment = space.environments().find(CONTENTFUL_ENV_ID)
 
-    entry = environment.entries().find(entry_id)
-    entry.fields('en-US')['mixcloudLink'] = sc_link
-    entry.save()
-    entry.publish()
-    print(f"SoundCloud link updated for entry ID {entry_id}.")
+        entry = environment.entries().find(entry_id)
+        entry.fields('en-US')['mixcloudLink'] = sc_link
+        entry.save()
+        entry.publish()
+        print(f"SoundCloud link updated for entry ID {entry_id}.")
+    
+    except Exception as e:
+        error_message = f"Error updating show {entry_id} with SoundCloud link: {str(e)}"
+        send_error_to_slack(error_message)
+        print(error_message)
 
 
 def get_show_from_timestamp(timestamp):
@@ -139,7 +149,9 @@ def get_show_from_timestamp(timestamp):
         show = response.json()  # Parse the JSON response
         return show
     except requests.RequestException as e:
-        print(f"Error fetching show for timestamp {timestamp}: {e}")
+        error_message = "Error fetching show for timestamp {timestamp}: {e}"
+        print(error_message)
+        send_error_to_slack(error_message)
         return None
     
 def fetch_show_details_from_contentful(timestamp):
