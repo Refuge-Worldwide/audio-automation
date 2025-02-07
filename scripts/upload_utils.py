@@ -42,13 +42,16 @@ def get_drive_service():
 
 def get_soundcloud_token():
     """Retrieve a valid SoundCloud OAuth token, refreshing if expired."""
-    # Retrieve the access token and refresh token (stored securely)
+    # Retrieve the access token, refresh token and expiration time (stored securely)
     access_token = os.getenv("SC_ACCESS_TOKEN")
     refresh_token = os.getenv("SC_REFRESH_TOKEN")
-    expires_at = datetime.now() + timedelta(seconds=3599)
+    expires_at = os.getenv("TOKEN_EXPIRATION_TIME")
+
+    #convert expiration time to datetime object
+    expires_at_date_object = datetime.fromtimestamp(expires_at)
 
     # If the access token has expired, refresh it
-    if datetime.now() >= expires_at:
+    if datetime.now() >= expires_at_date_object:
         print("Access token expired, refreshing...")
         refresh_url = "https://api.soundcloud.com/oauth2/token"
         data = {
@@ -63,7 +66,8 @@ def get_soundcloud_token():
             new_tokens = response.json()
             access_token = new_tokens["access_token"]
             refresh_token = new_tokens["refresh_token"]
-            expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"])
+            # Add buffer of 60 seconds to ensure we don't try an invalid token due to some delay
+            expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"] - timedelta(seconds=60))
 
             # Save the new access token and expiration time (you may store it in DB or environment)
             os.environ["SC_ACCESS_TOKEN"] = access_token
