@@ -10,6 +10,7 @@ from supabase import create_client, Client
 import contentful_management
 import requests
 from error_handling import send_error_to_slack
+import emoji
 
 load_dotenv()
 
@@ -77,10 +78,21 @@ def get_soundcloud_token():
 
     return access_token
 
-def upload_to_soundcloud(audio_segment, title, description):
+def upload_to_soundcloud(audio_segment, show_metadata):
     """Upload audio to SoundCloud."""
     import json
+    def download_image(image_url):
+        response = requests.get(image_url)
+        response.raise_for_status()  # Raise an exception if the image download fails
+        return response.content  # Return the raw image data
 
+    # Image URL from Contentful show data
+    image_url = "https:" + show_metadata["artwork"]
+
+    # Download the image
+    image_data = download_image(image_url)
+
+    #
     try:
         # Convert the AudioSegment to a BytesIO object
         audio_file = io.BytesIO()
@@ -95,10 +107,14 @@ def upload_to_soundcloud(audio_segment, title, description):
         response = requests.post(
             "https://api.soundcloud.com/tracks",
             headers={"Authorization": f"OAuth {token}"},
-            files={"track[asset_data]": audio_file},
+            files={
+                "track[asset_data]": audio_file,
+                "track[artwork_data]": ("artwork.png", image_data, "image/png")
+                },
             data={
-                "track[title]": title,
-                "track[description]": description,
+                "track[title]": show_metadata["title"],
+                "track[description]": show_metadata["description"],
+                 "track[tag_list]": " ".join([f"{genre.replace(' ', '_')}" for genre in show_metadata["genres"]]),
                 "track[sharing]": "private",
                 "track[downloadable]": "true"
             }
@@ -140,8 +156,18 @@ def update_show_sc_link(entry_id, sc_link):
         print(error_message)
 
 
+from datetime import datetime, timezone
+import os
+import requests
+
 def get_show_from_timestamp(timestamp):
     try:
+        if isinstance(timestamp, str):
+            try:
+                timestamp = timestamp[:-2] + "15"
+            except ValueError:
+                raise ValueError(f"Invalid timestamp format: {timestamp}")
+
         api_key = os.getenv('WEBSITE_API_KEY')
         headers = {'Authorization': f'Bearer {api_key}'}
         response = requests.get(f"https://refugeworldwide.com/api/shows/by-timestamp?t={timestamp}", headers=headers)
@@ -153,14 +179,26 @@ def get_show_from_timestamp(timestamp):
         print(error_message)
         send_error_to_slack(error_message)
         return None
+
     
 def fetch_show_details_from_contentful(timestamp):
     show = get_show_from_timestamp(timestamp)
+    show_metadata = {}
+
+
     if show:
-        show_name = show.fields('en-US').get('name', 'Unknown Show')
-        show_description = show.fields('en-US').get('description', 'No description available.')
-        show_image = show.fields('en-US').get('image', {}).get('url', None)
-        return show_name, show_description, show_image
+        show = show[0]
+        date_obj = datetime.strptime(timestamp, "%Y%m%dT%H%M")
+        formatted_date = date_obj.strftime("%d %b %Y")
+        show_name, artists = show["title"].split(" | ")
+        final_title = f"{show_name} - {artists} - {formatted_date}"
+
+        show_metadata["entry_id"] = show["id"]
+        show_metadata["title"] = final_title
+        show_metadata["description"] = "🌐 Refuge Worldwide is a radio station and community space based in Berlin-Neukölln.\n➡️ More info, more music: www.refugeworldwide.com\n\nSupport us by becoming a member on Patreon for just 3€ a month: www.patreon.com/refugeworldwide"
+        show_metadata["artwork"] = show["artwork"]
+        show_metadata["genres"] = show["genres"]
+        return show_metadata
     return None, None, None
 
 def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
@@ -171,13 +209,9 @@ def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
         print(f"No metadata found for timestamp: {timestamp}")
         return
 
-    title = show_metadata['title']
-    description = show_metadata['description']
-    entry_id = show_metadata['entry_id']
-
     # Upload to SoundCloud
-    sc_link = upload_to_soundcloud(audio_segment, title, description)
-
+    sc_link = upload_to_soundcloud(audio_segment, show_metadata)
+    entry_id = show_metadata["entry_id"]
     # Update Contentful entry with SoundCloud link
     update_show_sc_link(entry_id, sc_link)
     print(f"SoundCloud link updated in Contentful for entry {entry_id}")

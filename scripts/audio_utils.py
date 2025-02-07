@@ -49,12 +49,14 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
         if file_extension in ('wav', 'mp3'):
             try:
                 start_time = time.time()
-                date_str = name[:8]
-                time_str = name[9:13]
-                date = datetime.strptime(date_str, "%Y%m%d")
-                timestamp = f"{date.strftime('%d %b')} {time_str[:2]}:{time_str[2:]}"
-                folder_name = date.strftime('%d %b')
+                date_str = name[:8]  # Extract "YYYYMMDD"
+                time_str = name[9:13]  # Extract "HHMM"
 
+                # Convert to datetime object
+                date_time = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M")
+
+                # Format as "YYYYMMDDTHH15"
+                timestamp = date_time.strftime("%Y%m%dT%H%M")
                 show = download_file(service, show_id)
                 print("beginning to process audio")
                 if len(show) > 1800000:
