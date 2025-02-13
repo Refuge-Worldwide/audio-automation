@@ -10,7 +10,6 @@ from supabase import create_client, Client
 import contentful_management
 import requests
 from error_handling import send_error_to_slack
-import emoji
 
 load_dotenv()
 
@@ -48,7 +47,7 @@ def get_soundcloud_token():
     expires_at = os.getenv("TOKEN_EXPIRATION_TIME")
 
     #convert expiration time to datetime object
-    expires_at_date_object = datetime.fromtimestamp(expires_at)
+    expires_at_date_object = datetime.fromtimestamp(int(expires_at))
 
     # If the access token has expired, refresh it
     if datetime.now() >= expires_at_date_object:
@@ -67,7 +66,7 @@ def get_soundcloud_token():
             access_token = new_tokens["access_token"]
             refresh_token = new_tokens["refresh_token"]
             # Add buffer of 60 seconds to ensure we don't try an invalid token due to some delay
-            expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"] - timedelta(seconds=60))
+            expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"] - 60)
 
             # Save the new access token and expiration time (you may store it in DB or environment)
             os.environ["SC_ACCESS_TOKEN"] = access_token
@@ -160,10 +159,6 @@ def update_show_sc_link(entry_id, sc_link):
         print(error_message)
 
 
-from datetime import datetime, timezone
-import os
-import requests
-
 def get_show_from_timestamp(timestamp):
     try:
         if isinstance(timestamp, str):
@@ -188,8 +183,6 @@ def get_show_from_timestamp(timestamp):
 def fetch_show_details_from_contentful(timestamp):
     show = get_show_from_timestamp(timestamp)
     show_metadata = {}
-
-
     if show:
         show = show[0]
         date_obj = datetime.strptime(timestamp, "%Y%m%dT%H%M")
@@ -234,6 +227,36 @@ def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
 
     media = MediaIoBaseUpload(file_stream, mimetype='audio/mp3', resumable=True)
     service.files().create(body=file_metadata, media_body=media, fields='id').execute()
+
+
+def move_file_to_folder(service, file_id, folder_id):
+    """Move a file to a different folder in Google Drive."""
+    try:
+        # Retrieve the existing parent folder(s)
+        file = service.files().get(fileId=file_id, fields="parents").execute()
+        previous_parents = file.get("parents", [])
+
+        if previous_parents:
+            previous_parents_str = ",".join(previous_parents)
+            # Remove old parents and add the new parent
+            service.files().update(
+                fileId=file_id,
+                addParents=folder_id,
+                removeParents=previous_parents_str,
+                fields="id, parents"
+            ).execute()
+            print(f"Successfully moved file {file_id} to folder {folder_id}")
+        else:
+            # If no existing parents, just add the new parent
+            service.files().update(
+                fileId=file_id,
+                addParents=folder_id,
+                fields="id, parents"
+            ).execute()
+            print(f"Successfully added file {file_id} to folder {folder_id} (no previous parent)")
+
+    except Exception as e:
+        print(f"Error moving file {file_id} to folder {folder_id}: {e}")
 
 
 # if __name__ == "__main__":

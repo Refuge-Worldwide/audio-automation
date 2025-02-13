@@ -5,8 +5,12 @@ import gc
 from datetime import datetime
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from upload_utils import get_show_from_timestamp, upload_to_soundcloud_with_metadata  # Import from the upload script
+from upload_utils import move_file_to_folder, upload_to_soundcloud_with_metadata  # Import from the upload script
 from error_handling import send_error_to_slack
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 def download_file(service, file_id):
     """Download a file by its ID and return as an AudioSegment."""
@@ -29,7 +33,8 @@ def download_file(service, file_id):
     output.seek(0)  # Ensure file pointer is at the beginning after download
     file_size = len(output.getvalue())  # Get the size of the downloaded file
     print(f"Downloaded file size: {file_size} bytes")
-
+    if (file_size>250000000):
+        return
     end_time = time.time()
     print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
     return AudioSegment.from_file(output)
@@ -84,6 +89,11 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                     sc_link = upload_to_soundcloud_with_metadata(final_output, timestamp)
                     print(f"SoundCloud link: {sc_link}")
+                    # Define the processed files folder ID (replace with actual ID)
+                    PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
+
+                    # Move the file after successful upload
+                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
 
                     del show, trimmed_show, final_output
                     gc.collect()
