@@ -5,13 +5,15 @@ import io
 import os
 import requests
 from datetime import datetime, timedelta
-from dotenv import load_dotenv
+from dotenv import load_dotenv, set_key, find_dotenv
 from supabase import create_client, Client
 import contentful_management
 import requests
 from error_handling import send_error_to_slack
+from supabase import create_client, Client 
 
-load_dotenv()
+dotenv_path = find_dotenv()
+load_dotenv(dotenv_path)
 
 url: str = os.getenv("SUPABASE_URL")
 key: str = os.getenv("SUPABASE_TOKEN")
@@ -38,6 +40,14 @@ def get_drive_service():
     )
     return build('drive', 'v3', credentials=credentials)
 
+
+# Function to update a key-value pair in the .env file
+def update_env_file(key, value):
+    # Update the environment variable in the current session
+    os.environ[key] = value
+
+    # Update the .env file
+    set_key(dotenv_path, key, value)
 
 def get_soundcloud_token():
     """Retrieve a valid SoundCloud OAuth token, refreshing if expired."""
@@ -69,10 +79,11 @@ def get_soundcloud_token():
             expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"] - 60)
 
             # Save the new access token and expiration time (you may store it in DB or environment)
-            os.environ["SC_ACCESS_TOKEN"] = access_token
-            os.environ["SC_REFRESH_TOKEN"] = refresh_token
-            os.environ["TOKEN_EXPIRATION_TIME"] = str(int(expires_at.timestamp()))
+            update_env_file("SC_ACCESS_TOKEN", access_token)
+            update_env_file("SC_REFRESH_TOKEN", refresh_token)
+            update_env_file("TOKEN_EXPIRATION_TIME", str(int(expires_at.timestamp())))
             print(f"New access token obtained: {access_token}")
+            print(f"New refresh token obtained: {refresh_token}")
         else:
             error_message = "Failed to refresh access token"
             print(error_message)
@@ -117,7 +128,7 @@ def upload_to_soundcloud(audio_segment, show_metadata):
             data={
                 "track[title]": show_metadata["title"],
                 "track[description]": show_metadata["description"],
-                 "track[tag_list]": " ".join([f"{genre.replace(' ', '_')}" for genre in show_metadata["genres"]]),
+                "track[tag_list]": " ".join([f"\"{genre}\"" for genre in show_metadata["genres"]]),
                 "track[sharing]": "private",
                 "track[downloadable]": "true"
             }
@@ -201,7 +212,7 @@ def fetch_show_details_from_contentful(timestamp):
 def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
     """Upload audio to SoundCloud with metadata and update Contentful."""
     show_metadata = fetch_show_details_from_contentful(timestamp)
-
+    print(show_metadata)
     if not show_metadata:
         print(f"No metadata found for timestamp: {timestamp}")
         return
@@ -229,32 +240,34 @@ def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     service.files().create(body=file_metadata, media_body=media, fields='id').execute()
 
 
-def move_file_to_folder(service, file_id, folder_id):
+def move_file_to_folder(service, file_id, folder_id, prev_folder):
     """Move a file to a different folder in Google Drive."""
     try:
-        # Retrieve the existing parent folder(s)
-        file = service.files().get(fileId=file_id, fields="parents").execute()
-        previous_parents = file.get("parents", [])
+        # Retrieve the existing parents to remove
+        file = service.files().get(fileId=file_id, fields='parents').execute()
+        parents = file.get('parents')
 
-        if previous_parents:
-            previous_parents_str = ",".join(previous_parents)
-            # Remove old parents and add the new parent
-            service.files().update(
-                fileId=file_id,
-                addParents=folder_id,
-                removeParents=previous_parents_str,
-                fields="id, parents"
-            ).execute()
-            print(f"Successfully moved file {file_id} to folder {folder_id}")
-        else:
-            # If no existing parents, just add the new parent
-            service.files().update(
-                fileId=file_id,
-                addParents=folder_id,
-                fields="id, parents"
-            ).execute()
-            print(f"Successfully added file {file_id} to folder {folder_id} (no previous parent)")
+        # Debugging statements
+        print(f"parents type: {type(parents)}")
+        print(f"parents value: {parents}")
 
+        if not parents:
+            raise ValueError("No parents found for the file")
+
+        if not isinstance(parents, list):
+            raise ValueError("Expected a list for parents")
+
+        previous_parents = ",".join(parents)
+
+        print(f"removing previous parent")
+        # Remove old parent and add the new parent
+        service.files().update(
+            fileId=file_id,
+            addParents=folder_id,
+            removeParents=prev_folder,
+            fields="id, parents"
+        ).execute()
+        print(f"Successfully moved file {file_id} to folder {folder_id}")
     except Exception as e:
         print(f"Error moving file {file_id} to folder {folder_id}: {e}")
 
