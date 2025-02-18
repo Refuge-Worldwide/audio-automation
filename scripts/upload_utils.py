@@ -212,7 +212,6 @@ def fetch_show_details_from_contentful(timestamp):
 def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
     """Upload audio to SoundCloud with metadata and update Contentful."""
     show_metadata = fetch_show_details_from_contentful(timestamp)
-    print(show_metadata)
     if not show_metadata:
         print(f"No metadata found for timestamp: {timestamp}")
         return
@@ -222,7 +221,7 @@ def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
     entry_id = show_metadata["entry_id"]
     # Update Contentful entry with SoundCloud link
     update_show_sc_link(entry_id, sc_link)
-    print(f"SoundCloud link updated in Contentful for entry {entry_id}")
+    return sc_link
 
 def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     """Upload an audio file to Google Drive."""
@@ -240,42 +239,59 @@ def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     service.files().create(body=file_metadata, media_body=media, fields='id').execute()
 
 
-def move_file_to_folder(service, file_id, folder_id, prev_folder):
-    """Move a file to a different folder in Google Drive."""
-    try:
-        # Retrieve the existing parents to remove
-        file = service.files().get(fileId=file_id, fields='parents').execute()
-        parents = file.get('parents')
+from googleapiclient.errors import HttpError
 
-        # Debugging statements
-        print(f"parents type: {type(parents)}")
-        print(f"parents value: {parents}")
+def move_file_to_folder(service, file_id, new_folder_id):
+    """Move a file to a folder, even if it has no parents."""
+    try:
+        # Step 1: Get file metadata
+        file_metadata = service.files().get(fileId=file_id, fields='id, name, parents').execute()
+        parents = file_metadata.get('parents', [])
+
+        print(f"Retrieved file metadata: {file_metadata}")
+        print(f"Parents type: {type(parents)}")
+        print(f"Parents value: {parents}")
 
         if not parents:
-            raise ValueError("No parents found for the file")
+            print(f"File {file_id} has NO parents. Copying to {new_folder_id}...")
 
-        if not isinstance(parents, list):
-            raise ValueError("Expected a list for parents")
+            # Step 2: Create a copy in the target folder
+            copied_file = service.files().copy(
+                fileId=file_id,
+                body={"name": file_metadata["name"], "parents": [new_folder_id]}
+            ).execute()
 
-        previous_parents = ",".join(parents)
+            print(f"Copied file to new folder. New file ID: {copied_file['id']}")
 
-        print(f"removing previous parent")
-        # Remove old parent and add the new parent
+            # Step 3: Delete the original file
+            service.files().delete(fileId=file_id).execute()
+            print(f"Deleted original file {file_id}")
+
+            return  # Exit after copying and deleting
+
+        # Step 4: Normal move operation if the file has parents
+        current_folder_id = parents[0]
+        print(f"Moving file {file_id} from {current_folder_id} to {new_folder_id}...")
+
         service.files().update(
             fileId=file_id,
-            addParents=folder_id,
-            removeParents=prev_folder,
+            addParents=new_folder_id,
+            removeParents=current_folder_id,
             fields="id, parents"
         ).execute()
-        print(f"Successfully moved file {file_id} to folder {folder_id}")
+
+        print(f"Successfully moved file {file_id} to folder {new_folder_id}")
+
+    except HttpError as e:
+        print(f"Google Drive API error: {e}")
     except Exception as e:
-        print(f"Error moving file {file_id} to folder {folder_id}: {e}")
+        print(f"Error moving file {file_id} to folder {new_folder_id}: {e}")
 
-
-# if __name__ == "__main__":
-#     response = get_show_fields()
-#     if response:
-#         print("SoundCloud Token:", response)
-#     else:
-#         print("Failed to obtain a valid token.")
+if __name__ == "__main__":
+    service = get_drive_service()
+    response = move_file_to_folder(service, "1v-D_oAvM7zujhNKSe5UL0XebJJA497JA", "1eLgeArBwyDZ6POMM2w4avZO4KfsUWPsV")
+    if response:
+        print(response)
+    else:
+        print("Failed to obtain response")
 

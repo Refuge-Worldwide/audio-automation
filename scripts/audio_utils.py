@@ -14,44 +14,38 @@ load_dotenv()
 
 def download_file(service, file_id):
     """Download a file by its ID and return as an AudioSegment."""
-    try:
-        # TODO: Add error handling to this function. Perhaps a timeout for downloading.
-        start_time = time.time()
-        request = service.files().get_media(fileId=file_id)
-        output = io.BytesIO()
-        downloader = MediaIoBaseDownload(output, request)
 
-        done = False
-        while not done:
-            status, done = downloader.next_chunk()
-            print(f"Downloaded {int(status.progress() * 100)}%")
-            if done:
-                print("Download complete.")
-            else:
-                print("Downloading...")
+    # TODO: Add error handling to this function. Perhaps a timeout for downloading.
+    start_time = time.time()
+    request = service.files().get_media(fileId=file_id)
+    output = io.BytesIO()
+    downloader = MediaIoBaseDownload(output, request)
 
-        output.seek(0)  # Ensure file pointer is at the beginning after download
-        file_size = len(output.getvalue())  # Get the size of the downloaded file
-        print(f"Downloaded file size: {file_size} bytes")
-        if (file_size>500000000):
-            print("File size exceeds limit, skipping file.")
-            return
-        end_time = time.time()
-        print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
-        return AudioSegment.from_file(output)
-    except Exception as e:
-            print(f"Error downloading file {file_id}: {e}")
-            return None
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        print(f"Downloaded {int(status.progress() * 100)}%")
+        if done:
+            print("Download complete.")
+        else:
+            print("Downloading...")
 
+    output.seek(0)  # Ensure file pointer is at the beginning after download
+    file_size = len(output.getvalue())  # Get the size of the downloaded file
+    print(f"Downloaded file size: {file_size} bytes")
+    end_time = time.time()
+    print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
+    return AudioSegment.from_file(output)
+
+def get_file_ids_from_folder(service, folder_id):
+    query = f"'{folder_id}' in parents"
+    response = service.files().list(q=query).execute()
+    return {file['name']: file['id'] for file in response.get('files', [])}
 
 def process_audio_files(service, folder_id, start_jingle, end_jingle):
     """Process audio files from the given folder."""
-    def get_file_ids_from_folder(service, folder_id):
-        query = f"'{folder_id}' in parents"
-        response = service.files().list(q=query).execute()
-        return {file['name']: file['id'] for file in response.get('files', [])}
-
     file_ids = get_file_ids_from_folder(service, folder_id)
+
     for name, show_id in file_ids.items():
         file_extension = name.split('.')[-1].lower()
         if file_extension in ('wav', 'mp3'):
@@ -62,13 +56,10 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                 # Convert to datetime object
                 date_time = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M")
+
                 # Format as "YYYYMMDDTHH15"
                 timestamp = date_time.strftime("%Y%m%dT%H%M")
                 show = download_file(service, show_id)
-                if show is None:
-                    print(f"Skipping file {name} due to download error or size limit.")
-                    continue
-
                 print("beginning to process audio")
                 if len(show) > 1800000:
                     start_trim = silence.detect_leading_silence(show)
@@ -91,16 +82,15 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                         end_jingle[7200:]
                     )
 
-                    print("finished to process audio")
+                    print("finished processing audio")
 
                     sc_link = upload_to_soundcloud_with_metadata(final_output, timestamp)
                     print(f"SoundCloud link: {sc_link}")
                     # Define the processed files folder ID (replace with actual ID)
+                    PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
 
                     # Move the file after successful upload
-                    PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
-                    INPUT_FOLDER_ID = os.getenv("INPUT_FOLDER_ID")
-                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID, INPUT_FOLDER_ID)
+                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
 
                     del show, trimmed_show, final_output
                     gc.collect()
