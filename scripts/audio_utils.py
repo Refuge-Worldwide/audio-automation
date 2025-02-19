@@ -2,7 +2,7 @@ from pydub import AudioSegment, silence
 import io
 import time
 import gc
-from datetime import datetime
+from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 from upload_utils import move_file_to_folder, upload_to_soundcloud_with_metadata  # Import from the upload script
@@ -56,6 +56,9 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                 # Convert to datetime object
                 date_time = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M")
+
+                # Add 15 minutes to the datetime object
+                date_time += timedelta(minutes=15)
 
                 # Format as "YYYYMMDDTHH15"
                 timestamp = date_time.strftime("%Y%m%dT%H%M")

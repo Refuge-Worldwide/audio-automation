@@ -129,7 +129,7 @@ def upload_to_soundcloud(audio_segment, show_metadata):
                 "track[title]": show_metadata["title"],
                 "track[description]": show_metadata["description"],
                 "track[tag_list]": " ".join([f"\"{genre}\"" for genre in show_metadata["genres"]]),
-                "track[sharing]": "private",
+                "track[sharing]": "public",
                 "track[downloadable]": "true"
             }
         )
@@ -171,13 +171,7 @@ def update_show_sc_link(entry_id, sc_link):
 
 
 def get_show_from_timestamp(timestamp):
-    try:
-        if isinstance(timestamp, str):
-            try:
-                timestamp = timestamp[:-2] + "15"
-            except ValueError:
-                raise ValueError(f"Invalid timestamp format: {timestamp}")
-
+    try:            
         api_key = os.getenv('WEBSITE_API_KEY')
         headers = {'Authorization': f'Bearer {api_key}'}
         response = requests.get(f"https://refugeworldwide.com/api/shows/by-timestamp?t={timestamp}", headers=headers)
@@ -210,7 +204,7 @@ def fetch_show_details_from_contentful(timestamp):
     return None, None, None
 
 def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
-    """Upload audio to SoundCloud with metadata and update Contentful."""
+
     show_metadata = fetch_show_details_from_contentful(timestamp)
     if not show_metadata:
         print(f"No metadata found for timestamp: {timestamp}")
