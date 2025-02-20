@@ -243,8 +243,6 @@ def move_file_to_folder(service, file_id, new_folder_id):
         parents = file_metadata.get('parents', [])
 
         print(f"Retrieved file metadata: {file_metadata}")
-        print(f"Parents type: {type(parents)}")
-        print(f"Parents value: {parents}")
 
         if not parents:
             print(f"File {file_id} has NO parents. Copying to {new_folder_id}...")

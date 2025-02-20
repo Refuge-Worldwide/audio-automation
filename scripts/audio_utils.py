@@ -42,6 +42,12 @@ def get_file_ids_from_folder(service, folder_id):
     response = service.files().list(q=query).execute()
     return {file['name']: file['id'] for file in response.get('files', [])}
 
+def format_time(ms):
+    seconds = ms // 1000
+    minutes = seconds // 60
+    hours = minutes // 60
+    return f"{hours:02}:{minutes % 60:02}:{seconds % 60:02}"
+
 def process_audio_files(service, folder_id, start_jingle, end_jingle):
     """Process audio files from the given folder."""
     file_ids = get_file_ids_from_folder(service, folder_id)
@@ -65,9 +71,26 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                 show = download_file(service, show_id)
                 print("beginning to process audio")
                 if len(show) > 1800000:
-                    start_trim = silence.detect_leading_silence(show)
-                    end_trim = silence.detect_leading_silence(show.reverse())
-                    trimmed_show = show[start_trim:len(show) - end_trim]
+                    # Detect silences longer than 5 seconds (3000 ms)
+                    silent_ranges = silence.detect_silence(show, min_silence_len=5000, seek_step=100, silence_thresh=-50)
+
+                    # Flatten the list of silent ranges
+                    silent_ranges = [item for sublist in silent_ranges for item in sublist]
+
+                    # Convert silent ranges to readable format
+                    formatted_silent_ranges = [(format_time(start), format_time(end)) for start, end in zip(silent_ranges[::2], silent_ranges[1::2])]
+                    print(f"Silent ranges (start, end): {formatted_silent_ranges}")
+
+                    # Remove the silent ranges from the audio
+                    segments = []
+                    start = 0
+                    for i in range(0, len(silent_ranges), 2):
+                        segments.append(show[start:silent_ranges[i]])
+                        start = silent_ranges[i + 1]
+                    segments.append(show[start:])
+
+                    # Concatenate the segments to form the final audio without long silences
+                    trimmed_show = sum(segments, AudioSegment.silent(duration=0))
 
                     start_jingle_end = start_jingle[-5800:].fade_out(5800)
                     trimmed_start = trimmed_show[:5800].fade_in(5800)
