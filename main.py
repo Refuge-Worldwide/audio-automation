@@ -1,8 +1,7 @@
-from audio_utils import process_audio_files, download_file
-from upload_utils import get_drive_service
+from scripts.audio_utils import process_audio_files, download_file
+from scripts.upload_utils import get_drive_service
 from pydub import AudioSegment
 import os
-
 
 def main():
     """Coordinate the entire audio processing and upload pipeline."""
