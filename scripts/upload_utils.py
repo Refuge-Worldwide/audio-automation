@@ -4,7 +4,7 @@ from google.oauth2 import service_account
 import io
 import os
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from dotenv import load_dotenv, set_key, find_dotenv
 from supabase import create_client, Client
 import contentful_management
@@ -40,27 +40,20 @@ def get_drive_service():
     )
     return build('drive', 'v3', credentials=credentials)
 
-
-# Function to update a key-value pair in the .env file
-def update_env_file(key, value):
-    # Update the environment variable in the current session
-    os.environ[key] = value
-
-    # Update the .env file
-    set_key(dotenv_path, key, value)
-
 def get_soundcloud_token():
     """Retrieve a valid SoundCloud OAuth token, refreshing if expired."""
-    # Retrieve the access token, refresh token and expiration time (stored securely)
-    access_token = os.getenv("SC_ACCESS_TOKEN")
-    refresh_token = os.getenv("SC_REFRESH_TOKEN")
-    expires_at = os.getenv("TOKEN_EXPIRATION_TIME")
+
+    # Retrieve the access token, refresh token and expiration time from supbase
+    response = supabase.from_("accessTokens").select("*").eq("application", "soundcloud").single().execute()
+    access_token = response.data["token"]
+    refresh_token = response.data["refresh_token"]
+    expires_at = response.data["expires"]
 
     #convert expiration time to datetime object
-    expires_at_date_object = datetime.fromtimestamp(int(expires_at))
+    expires_at_date_object = datetime.strptime(expires_at, "%Y-%m-%dT%H:%M:%S%z")
 
     # If the access token has expired, refresh it
-    if datetime.now() >= expires_at_date_object:
+    if datetime.now(timezone.utc) >= expires_at_date_object:
         print("Access token expired, refreshing...")
         refresh_url = "https://api.soundcloud.com/oauth2/token"
         data = {
@@ -77,11 +70,16 @@ def get_soundcloud_token():
             refresh_token = new_tokens["refresh_token"]
             # Add buffer of 60 seconds to ensure we don't try an invalid token due to some delay
             expires_at = datetime.now() + timedelta(seconds=new_tokens["expires_in"] - 60)
+            expires_at_str = expires_at.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-            # Save the new access token and expiration time (you may store it in DB or environment)
-            update_env_file("SC_ACCESS_TOKEN", access_token)
-            update_env_file("SC_REFRESH_TOKEN", refresh_token)
-            update_env_file("TOKEN_EXPIRATION_TIME", str(int(expires_at.timestamp())))
+            """Update the SoundCloud token in Supabase."""
+            data = {
+                "token": access_token,
+                "refresh_token": refresh_token,
+                "expires": expires_at_str
+            }
+            response = supabase.from_("accessTokens").update(data).eq("application", "soundcloud").execute()
+        
             print(f"New access token obtained: {access_token}")
             print(f"New refresh token obtained: {refresh_token}")
         else:
