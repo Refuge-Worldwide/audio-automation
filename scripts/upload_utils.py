@@ -55,7 +55,7 @@ def get_soundcloud_token():
     # If the access token has expired, refresh it
     if datetime.now(timezone.utc) >= expires_at_date_object:
         print("Access token expired, refreshing...")
-        refresh_url = "https://api.soundcloud.com/oauth2/token"
+        refresh_url = "https://secure.soundcloud.com/oauth/token"
         data = {
             "grant_type": "refresh_token",
             "client_id": os.getenv("SC_CLIENT_ID"),
@@ -115,12 +115,15 @@ def upload_to_soundcloud(audio_segment, show_metadata):
         token = get_soundcloud_token()
         print(f"Using token: {token}")
 
+        # Create the filename with the show name and title
+        filename = f"{show_metadata['title']}.mp3"
+
         # Send the POST request to SoundCloud with the token in the Authorization header
         response = requests.post(
             "https://api.soundcloud.com/tracks",
             headers={"Authorization": f"OAuth {token}"},
             files={
-                "track[asset_data]": audio_file,
+                "track[asset_data]": (filename, audio_file, "audio/,mpeg"),
                 "track[artwork_data]": ("artwork.png", image_data, "image/png")
                 },
             data={
@@ -128,7 +131,7 @@ def upload_to_soundcloud(audio_segment, show_metadata):
                 "track[description]": show_metadata["description"],
                 "track[tag_list]": " ".join([f"\"{genre}\"" for genre in show_metadata["genres"]]),
                 "track[sharing]": "public",
-                "track[downloadable]": "true"
+                "track[downloadable]": "false"
             }
         )
 
@@ -284,4 +287,3 @@ if __name__ == "__main__":
         print(response)
     else:
         print("Failed to obtain response")
-
