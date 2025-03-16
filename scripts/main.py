@@ -8,6 +8,7 @@ def main():
     try:
         # Authenticate Google Drive service
         print("Authenticating Google Drive service...")
+        print(os.getenv('GOOGLE_DRIVE_PRIVATE_KEY'))
         drive_service = get_drive_service()
         print("Google Drive service authenticated.")
 
