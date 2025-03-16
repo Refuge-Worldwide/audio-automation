@@ -33,7 +33,7 @@ def get_drive_service():
         {
             "type": "service_account",
             "client_email": os.getenv('GOOGLE_DRIVE_CLIENT_EMAIL'),
-            "private_key": os.getenv('GOOGLE_DRIVE_PRIVATE_KEY').replace('\\n', '\n'),
+            "private_key": os.getenv('GOOGLE_DRIVE_PRIVATE_KEY'),
             "token_uri": "https://oauth2.googleapis.com/token"
         },
         scopes=SCOPES

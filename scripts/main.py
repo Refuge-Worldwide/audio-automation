@@ -7,7 +7,9 @@ def main():
     """Coordinate the entire audio processing and upload pipeline."""
     try:
         # Authenticate Google Drive service
+        print("Authenticating Google Drive service...")
         drive_service = get_drive_service()
+        print("Google Drive service authenticated.")
 
         # Google Drive folder IDs
         input_folder_id = os.getenv('INPUT_FOLDER_ID')
