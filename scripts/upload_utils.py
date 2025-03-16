@@ -29,11 +29,12 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 
 def get_drive_service():
     """Authenticate and return a Google Drive service instance."""
+    print(os.getenv('GOOGLE_DRIVE_PRIVATE_KEY').replace('\\n', '\n'))
     credentials = service_account.Credentials.from_service_account_info(
         {
             "type": "service_account",
             "client_email": os.getenv('GOOGLE_DRIVE_CLIENT_EMAIL'),
-            "private_key": os.getenv('GOOGLE_DRIVE_PRIVATE_KEY'),
+            "private_key": os.getenv('GOOGLE_DRIVE_PRIVATE_KEY').replace('\\n', '\n'),
             "token_uri": "https://oauth2.googleapis.com/token"
         },
         scopes=SCOPES
