@@ -17,4 +17,4 @@ RUN apt-get install -y ffmpeg
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Default command does nothing, script runs via Coolify cron job
-CMD ["sleep", "infinity"]
+CMD ["python scripts/main.py"]
