@@ -1,5 +1,5 @@
-# Use an official lightweight Python image
-FROM python:3.11-slim
+# Use an official Python image
+FROM python:3
 
 # Set the working directory
 WORKDIR /app
@@ -17,4 +17,4 @@ RUN apt-get install -y ffmpeg
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Default command does nothing, script runs via Coolify cron job
-CMD ["python scripts/main.py"]
+CMD ["sleep", "infinity"]
