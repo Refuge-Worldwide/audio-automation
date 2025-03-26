@@ -8,6 +8,11 @@ WORKDIR /app
 COPY requirements.txt ./
 COPY scripts/ ./scripts/
 
+# Install ffmpeg
+RUN apt-get -y update
+RUN apt-get -y upgrade
+RUN apt-get install -y ffmpeg
+
 # Install dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
