@@ -12,6 +12,7 @@ import requests
 from error_handling import send_error_to_slack
 from supabase import create_client, Client 
 import json
+import base64
 
 dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
@@ -30,9 +31,14 @@ SUPABASE_URL = os.getenv("SUPABASE_URL")
 
 def get_drive_service():
     """Authenticate and return a Google Drive service instance."""
-    service_account_info = json.loads(os.getenv('GOOGLE_DRIVE_SERVICE_ACCOUNT_JSON'))
+    print(os.getenv('GOOGLE_DRIVE_PRIVATE_KEY'))
     credentials = service_account.Credentials.from_service_account_info(
-        service_account_info,
+        {
+            "type": "service_account",
+            "client_email": os.getenv('GOOGLE_DRIVE_CLIENT_EMAIL'),
+            "private_key": os.getenv('GOOGLE_DRIVE_PRIVATE_KEY'),
+            "token_uri": "https://oauth2.googleapis.com/token"
+        },
         scopes=SCOPES
     )
     return build('drive', 'v3', credentials=credentials)
