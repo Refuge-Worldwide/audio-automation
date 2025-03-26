@@ -7,3 +7,4 @@ python-dotenv==1.0.1
 Requests==2.32.3
 supabase==2.13.0
 audioop-lts; python_version>='3.13'
+psutil==7.0.0
