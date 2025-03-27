@@ -5,16 +5,50 @@ import psutil
 import threading
 import os
 import time
+import logging
+import builtins
 
 def log_memory_usage_periodically():
+    logger = setup_logging()  # Set up logging
+
+
     """Log memory usage every 10 seconds."""
     process = psutil.Process(os.getpid())
     while True:
         memory_info = process.memory_info()
-        print(f"[Memory Monitor] Memory usage: {memory_info.rss / 1024 ** 2:.2f} MB")
+        logger.info(f"[Memory Monitor] Memory usage: {memory_info.rss / 1024 ** 2:.2f} MB")
         time.sleep(1)  # Wait for 10 seconds before logging again
 
+def setup_logging():
+    """Set up logging to log to both console and a file."""
+    logger = logging.getLogger("AudioAutomationLogger")
+    logger.setLevel(logging.INFO)
+
+    # Create a console handler
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO)
+
+    # Create a file handler
+    # file_handler = logging.FileHandler("server_logs.log")  # Logs will be saved to this file
+    # file_handler.setLevel(logging.INFO)
+
+    # Create a logging format
+    formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+    console_handler.setFormatter(formatter)
+    # file_handler.setFormatter(formatter)
+
+    # Add handlers to the logger
+    logger.addHandler(console_handler)
+    # logger.addHandler(file_handler)
+
+    # Override the built-in print function
+    builtins.print = lambda *args, **kwargs: logger.info(" ".join(map(str, args)))
+
+    return logger
+
 def main():
+    logger = setup_logging()  # Set up logging
+
     """Coordinate the entire audio processing and upload pipeline."""
     try:
         # Start memory monitoring in a separate thread
@@ -22,9 +56,9 @@ def main():
         memory_thread.start()
 
         # Authenticate Google Drive service
-        print("Authenticating Google Drive service...")
+        logger.info("Authenticating Google Drive service...")
         drive_service = get_drive_service()
-        print("Google Drive service authenticated.")
+        logger.info("Google Drive service authenticated.")
 
         # Google Drive folder IDs
         input_folder_id = os.getenv('INPUT_FOLDER_ID')
@@ -46,7 +80,7 @@ def main():
         print("Audio processing and uploads completed successfully.")
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        logger.error(f"An error occurred: {e}")
 
 if __name__ == "__main__":
     main()
