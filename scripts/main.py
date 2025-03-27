@@ -12,7 +12,7 @@ def log_memory_usage_periodically():
     while True:
         memory_info = process.memory_info()
         print(f"[Memory Monitor] Memory usage: {memory_info.rss / 1024 ** 2:.2f} MB")
-        time.sleep(10)  # Wait for 10 seconds before logging again
+        time.sleep(1)  # Wait for 10 seconds before logging again
 
 def main():
     """Coordinate the entire audio processing and upload pipeline."""

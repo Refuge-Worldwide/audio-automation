@@ -8,11 +8,12 @@ from googleapiclient.http import MediaIoBaseDownload
 from upload_utils import move_file_to_folder, upload_to_soundcloud_with_metadata  # Import from the upload script
 from error_handling import send_error_to_slack
 import os
+import tempfile
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def download_file(service, file_id):
+def download_file_as_audio_segment(service, file_id):
     """Download a file by its ID and return as an AudioSegment."""
 
     # TODO: Add error handling to this function. Perhaps a timeout for downloading.
@@ -36,6 +37,27 @@ def download_file(service, file_id):
     end_time = time.time()
     print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
     return AudioSegment.from_file(output)
+
+
+def download_file(service, file_id):
+    """Download a file by its ID and save it as a temporary file."""
+    start_time = time.time()
+    request = service.files().get_media(fileId=file_id)
+    temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".mp3")  # Create a temporary file
+    downloader = MediaIoBaseDownload(temp_file, request)
+
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        print(f"Downloaded {int(status.progress() * 100)}%")
+        if done:
+            print("Download complete.")
+
+    temp_file.close()  # Close the file to ensure it's written to disk
+    end_time = time.time()
+    print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
+    return temp_file.name  # Return the path to the temporary file
+
 
 def get_file_ids_from_folder(service, folder_id):
     query = f"'{folder_id}' in parents"
@@ -68,8 +90,14 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                 # Format as "YYYYMMDDTHH15"
                 timestamp = date_time.strftime("%Y%m%dT%H%M")
-                show = download_file(service, show_id)
-                print("beginning to process audio")
+
+                # Download the file to a temporary location
+                temp_file_path = download_file(service, show_id)
+
+                # Load the audio file from the temporary file
+                show = AudioSegment.from_file(temp_file_path)
+                print("Beginning to process audio")
+
                 if len(show) > 1800000:
                     # Detect silences longer than 5 seconds (3000 ms)
                     silent_ranges = silence.detect_silence(show, min_silence_len=5000, seek_step=100, silence_thresh=-50)
@@ -108,15 +136,23 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                         end_jingle[7200:]
                     )
 
-                    print("finished processing audio")
+                    print("Finished processing audio")
 
-                    sc_link = upload_to_soundcloud_with_metadata(final_output, timestamp)
-                    print(f"SoundCloud link: {sc_link}")
+                    # Save the final output to a temporary file
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".mp3") as output_file:
+                        final_output.export(output_file.name, format="mp3")
+                        sc_link = upload_to_soundcloud_with_metadata(output_file.name, timestamp)
+                        print(f"SoundCloud link: {sc_link}")
+
                     # Define the processed files folder ID (replace with actual ID)
                     PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
 
                     # Move the file after successful upload
                     move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+
+                    # Clean up temporary files
+                    os.remove(temp_file_path)
+                    os.remove(output_file.name)
 
                     del show, trimmed_show, final_output
                     gc.collect()
