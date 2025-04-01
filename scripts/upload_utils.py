@@ -92,7 +92,7 @@ def get_soundcloud_token():
 
     return access_token
 
-def upload_to_soundcloud(audio_segment, show_metadata):
+def upload_to_soundcloud(audio_file, show_metadata):
     """Upload audio to SoundCloud."""
     import json
     def download_image(image_url):
@@ -108,11 +108,6 @@ def upload_to_soundcloud(audio_segment, show_metadata):
 
     #
     try:
-        # Convert the AudioSegment to a BytesIO object
-        audio_file = io.BytesIO()
-        audio_segment.export(audio_file, format="mp3", bitrate="192k")
-        audio_file.seek(0)  # Reset file pointer
-
         # Get the SoundCloud token
         token = get_soundcloud_token()
         print(f"Using token: {token}")
@@ -132,7 +127,7 @@ def upload_to_soundcloud(audio_segment, show_metadata):
                 "track[title]": show_metadata["title"],
                 "track[description]": show_metadata["description"],
                 "track[tag_list]": " ".join([f"\"{genre}\"" for genre in show_metadata["genres"]]),
-                "track[sharing]": "public",
+                "track[sharing]": "private",
                 "track[downloadable]": "false"
             }
         )
@@ -154,24 +149,67 @@ def upload_to_soundcloud(audio_segment, show_metadata):
         print(error_message)
         raise
 
-# Function to update the SoundCloud link for a show in Contentful
-def update_show_sc_link(entry_id, sc_link):
-    try: 
+# Function to update the SoundCloud link and audio file for a show in Contentful
+def update_show_contentful(entry_id, name, sc_link, audio_file):
+    try:
+        audio_file.seek(0)
+
         client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
         space = client.spaces().find(CONTENTFUL_SPACE_ID)
         environment = space.environments().find(CONTENTFUL_ENV_ID)
+        
+        upload = space.uploads().create(audio_file)
+        print(f"File uploaded with ID: {upload.sys['id']}")
 
+        # Step 2: Create an asset and link the uploaded file
+        asset = environment.assets().create(
+            None,
+            {
+                "fields": {
+                    "title": {
+                        "en-US": name
+                    },
+                    "file": {
+                        "en-US": {
+                            "uploadFrom": {
+                                "sys": {
+                                    "type": "Link",
+                                    "linkType": "Upload",
+                                    "id": upload.sys['id']
+                                }
+                            },
+                            "fileName": f"{name}.mp3",
+                            "contentType": "audio/mpeg"
+                        }
+                    }
+                }
+            }
+        )
+        print(f"Asset created with ID: {asset.sys['id']}")
+
+        asset.process()
+        asset.publish()
+
+        print(f"Audio file uploaded and published as asset: {asset.sys['id']}")
+
+        # Step 2: Update the entry with the SoundCloud link and audio asset
         entry = environment.entries().find(entry_id)
         entry.fields('en-US')['mixcloudLink'] = sc_link
+        entry.fields('en-US')['audioFile'] = {
+            "sys": {
+                "type": "Link",
+                "linkType": "Asset",
+                "id": asset.sys['id']
+            }
+        }
         entry.save()
         entry.publish()
-        print(f"SoundCloud link updated for entry ID {entry_id}.")
-    
+        print(f"SoundCloud link and audio file updated for entry ID {entry_id}.")
+
     except Exception as e:
-        error_message = f"Error updating show {entry_id} with SoundCloud link: {str(e)}"
+        error_message = f"Error updating show {entry_id} with SoundCloud link and audio file: {str(e)}"
         send_error_to_slack(error_message)
         print(error_message)
-
 
 def get_show_from_timestamp(timestamp):
     try:            
@@ -205,20 +243,6 @@ def fetch_show_details_from_contentful(timestamp):
         show_metadata["genres"] = show["genres"]
         return show_metadata
     return None, None, None
-
-def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
-
-    show_metadata = fetch_show_details_from_contentful(timestamp)
-    if not show_metadata:
-        print(f"No metadata found for timestamp: {timestamp}")
-        return
-
-    # Upload to SoundCloud
-    sc_link = upload_to_soundcloud(audio_segment, show_metadata)
-    entry_id = show_metadata["entry_id"]
-    # Update Contentful entry with SoundCloud link
-    update_show_sc_link(entry_id, sc_link)
-    return sc_link
 
 def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     """Upload an audio file to Google Drive."""

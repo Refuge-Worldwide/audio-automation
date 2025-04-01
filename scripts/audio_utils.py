@@ -5,7 +5,7 @@ import gc
 from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from upload_utils import move_file_to_folder, upload_to_soundcloud_with_metadata  # Import from the upload script
+from upload_utils import move_file_to_folder, upload_to_soundcloud, fetch_show_details_from_contentful, update_show_contentful   # Import from the upload script
 from error_handling import send_error_to_slack
 import os
 from dotenv import load_dotenv
@@ -110,15 +110,34 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                     print("finished processing audio")
 
-                    sc_link = upload_to_soundcloud_with_metadata(final_output, timestamp)
+                    # Convert the AudioSegment to a BytesIO object
+                    audio_file = io.BytesIO()
+                    final_output.export(audio_file, format="mp3", bitrate="192k")
+                    audio_file.seek(0)  # Reset file pointer
+
+                    # Validate the BytesIO object content
+                    if audio_file.getbuffer().nbytes == 0:
+                        raise ValueError("CCCC The exported audio file is empty. Please check the export operation.")
+
+                    # Fetch metadata about show based on timestamp
+                    show_metadata = fetch_show_details_from_contentful(timestamp)
+
+                    # Upload to soundcloud
+                    sc_link = upload_to_soundcloud(audio_file, show_metadata)
+                    
+                    # Update show on contentful. Uploading audio file and updating soundcloud link
+                    entry_id = show_metadata["entry_id"]
+                    entry_title = show_metadata["title"]
+                    update_show_contentful(entry_id, entry_title, sc_link, audio_file)
+
                     print(f"SoundCloud link: {sc_link}")
                     # Define the processed files folder ID (replace with actual ID)
                     PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
 
                     # Move the file after successful upload
-                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+                    # move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
 
-                    del show, trimmed_show, final_output
+                    del show, trimmed_show, final_output, audio_file
                     gc.collect()
             except Exception as e:
                 error_message = f"Error processing audio {name}: {e}"
