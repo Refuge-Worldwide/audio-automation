@@ -5,7 +5,7 @@ import gc
 from datetime import datetime, timedelta
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
-from upload_utils import move_file_to_folder, upload_to_soundcloud, fetch_show_details_from_contentful, update_show_contentful   # Import from the upload script
+from upload_utils import move_file_to_folder, upload_to_soundcloud, fetch_show_details_from_contentful, update_show_contentful, delete_repeat_from_contentful   # Import from the upload script
 from error_handling import send_error_to_slack
 import os
 from dotenv import load_dotenv
@@ -69,76 +69,90 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                 # Format as "YYYYMMDDTHH15"
                 timestamp = date_time.strftime("%Y%m%dT%H%M")
                 show = download_file(service, show_id)
+
+                # If show length is short then don't process
+                if len(show) < 1800000: 
+                    print("Not processing show as its too small")
+                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+                    continue
+                
+                # Fetch metadata about show based on timestamp
+                show_metadata = fetch_show_details_from_contentful(timestamp)
+
+                # If the show is a repeat then delete from contentful and don't process
+                if "(r)" in show_metadata['title']:
+                    print("Deleting show as its a repeat")
+                    delete_repeat_from_contentful(show_metadata["entry_id"])
+                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+                    continue
+
                 print("beginning to process audio")
-                if len(show) > 1800000:
-                    # Detect silences longer than 5 seconds (3000 ms)
-                    silent_ranges = silence.detect_silence(show, min_silence_len=5000, seek_step=100, silence_thresh=-50)
 
-                    # Flatten the list of silent ranges
-                    silent_ranges = [item for sublist in silent_ranges for item in sublist]
+                # Detect silences longer than 5 seconds (3000 ms)
+                silent_ranges = silence.detect_silence(show, min_silence_len=5000, seek_step=100, silence_thresh=-50)
 
-                    # Convert silent ranges to readable format
-                    formatted_silent_ranges = [(format_time(start), format_time(end)) for start, end in zip(silent_ranges[::2], silent_ranges[1::2])]
-                    print(f"Silent ranges (start, end): {formatted_silent_ranges}")
+                # Flatten the list of silent ranges
+                silent_ranges = [item for sublist in silent_ranges for item in sublist]
 
-                    # Remove the silent ranges from the audio
-                    segments = []
-                    start = 0
-                    for i in range(0, len(silent_ranges), 2):
-                        segments.append(show[start:silent_ranges[i]])
-                        start = silent_ranges[i + 1]
-                    segments.append(show[start:])
+                # Convert silent ranges to readable format
+                formatted_silent_ranges = [(format_time(start), format_time(end)) for start, end in zip(silent_ranges[::2], silent_ranges[1::2])]
+                print(f"Silent ranges (start, end): {formatted_silent_ranges}")
 
-                    # Concatenate the segments to form the final audio without long silences
-                    trimmed_show = sum(segments, AudioSegment.silent(duration=0))
+                # Remove the silent ranges from the audio
+                segments = []
+                start = 0
+                for i in range(0, len(silent_ranges), 2):
+                    segments.append(show[start:silent_ranges[i]])
+                    start = silent_ranges[i + 1]
+                segments.append(show[start:])
 
-                    start_jingle_end = start_jingle[-5800:].fade_out(5800)
-                    trimmed_start = trimmed_show[:5800].fade_in(5800)
-                    blended_start = start_jingle_end.overlay(trimmed_start)
+                # Concatenate the segments to form the final audio without long silences
+                trimmed_show = sum(segments, AudioSegment.silent(duration=0))
 
-                    end_jingle_start = end_jingle[:7200].fade_in(7200)
-                    trimmed_end = trimmed_show[-7200:].fade_out(7200)
-                    blended_end = trimmed_end.overlay(end_jingle_start)
+                start_jingle_end = start_jingle[-5800:].fade_out(5800)
+                trimmed_start = trimmed_show[:5800].fade_in(5800)
+                blended_start = start_jingle_end.overlay(trimmed_start)
 
-                    final_output = (
-                        start_jingle[:-5800] +
-                        blended_start +
-                        trimmed_show[5800:-7200] +
-                        blended_end +
-                        end_jingle[7200:]
-                    )
+                end_jingle_start = end_jingle[:7200].fade_in(7200)
+                trimmed_end = trimmed_show[-7200:].fade_out(7200)
+                blended_end = trimmed_end.overlay(end_jingle_start)
 
-                    print("finished processing audio")
+                final_output = (
+                    start_jingle[:-5800] +
+                    blended_start +
+                    trimmed_show[5800:-7200] +
+                    blended_end +
+                    end_jingle[7200:]
+                )
 
-                    # Convert the AudioSegment to a BytesIO object
-                    audio_file = io.BytesIO()
-                    final_output.export(audio_file, format="mp3", bitrate="192k")
-                    audio_file.seek(0)  # Reset file pointer
+                print("finished processing audio")
 
-                    # Validate the BytesIO object content
-                    if audio_file.getbuffer().nbytes == 0:
-                        raise ValueError("CCCC The exported audio file is empty. Please check the export operation.")
+                # Convert the AudioSegment to a BytesIO object
+                audio_file = io.BytesIO()
+                final_output.export(audio_file, format="mp3", bitrate="192k")
+                audio_file.seek(0)  # Reset file pointer
 
-                    # Fetch metadata about show based on timestamp
-                    show_metadata = fetch_show_details_from_contentful(timestamp)
+                # Validate the BytesIO object content
+                if audio_file.getbuffer().nbytes == 0:
+                    raise ValueError("CCCC The exported audio file is empty. Please check the export operation.")
 
-                    # Upload to soundcloud
-                    sc_link = upload_to_soundcloud(audio_file, show_metadata)
-                    
-                    # Update show on contentful. Uploading audio file and updating soundcloud link
-                    entry_id = show_metadata["entry_id"]
-                    entry_title = show_metadata["title"]
-                    update_show_contentful(entry_id, entry_title, sc_link, audio_file)
+                # Upload to soundcloud
+                sc_link = upload_to_soundcloud(audio_file, show_metadata)
+                
+                # Update show on contentful. Uploading audio file and updating soundcloud link
+                entry_id = show_metadata["entry_id"]
+                entry_title = show_metadata["title"]
+                update_show_contentful(entry_id, entry_title, sc_link, audio_file)
 
-                    print(f"SoundCloud link: {sc_link}")
-                    # Define the processed files folder ID (replace with actual ID)
-                    PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
+                print(f"SoundCloud link: {sc_link}")
+                # Define the processed files folder ID (replace with actual ID)
+                PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
 
-                    # Move the file after successful upload
-                    # move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+                # Move the file after successful upload
+                move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
 
-                    del show, trimmed_show, final_output, audio_file
-                    gc.collect()
+                del show, trimmed_show, final_output, audio_file
+                gc.collect()
             except Exception as e:
                 error_message = f"Error processing audio {name}: {e}"
                 send_error_to_slack(error_message)

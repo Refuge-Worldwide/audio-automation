@@ -13,6 +13,7 @@ from error_handling import send_error_to_slack
 from supabase import create_client, Client 
 import json
 import base64
+import time
 
 dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
@@ -188,7 +189,9 @@ def update_show_contentful(entry_id, name, sc_link, audio_file):
         print(f"Asset created with ID: {asset.sys['id']}")
 
         asset.process()
-        asset.publish()
+        # TODO: Fix asset publishing, possibly have to wait for asset to finish
+        # processing but asset.process() is not an async function.
+        time.sleep(10)  # Wait for asset to process
 
         print(f"Audio file uploaded and published as asset: {asset.sys['id']}")
 
@@ -203,6 +206,8 @@ def update_show_contentful(entry_id, name, sc_link, audio_file):
             }
         }
         entry.save()
+        
+        asset.publish()
         entry.publish()
         print(f"SoundCloud link and audio file updated for entry ID {entry_id}.")
 
@@ -210,6 +215,26 @@ def update_show_contentful(entry_id, name, sc_link, audio_file):
         error_message = f"Error updating show {entry_id} with SoundCloud link and audio file: {str(e)}"
         send_error_to_slack(error_message)
         print(error_message)
+
+
+def delete_repeat_from_contentful(entry_id):
+    """Delete a show from contentful, used when its a repeat on the schedule."""
+    try:
+        # Initialize the Contentful Management client
+        client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
+        space = client.spaces().find(CONTENTFUL_SPACE_ID)
+        environment = space.environments().find(CONTENTFUL_ENV_ID)
+
+        # Find the show by ID
+        entry = environment.entries().find(entry_id)
+
+        # Delete the show
+        entry.delete()
+        print(f"Entry with ID {entry_id} has been deleted successfully.")
+
+    except Exception as e:
+        error_message = f"Error deleting repeat show with ID {entry_id}: {str(e)}"
+        send_error_to_slack(error_message)
 
 def get_show_from_timestamp(timestamp):
     try:            
