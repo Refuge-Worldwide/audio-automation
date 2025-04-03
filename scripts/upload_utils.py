@@ -128,7 +128,7 @@ def upload_to_soundcloud(audio_file, show_metadata):
                 "track[title]": show_metadata["title"],
                 "track[description]": show_metadata["description"],
                 "track[tag_list]": " ".join([f"\"{genre}\"" for genre in show_metadata["genres"]]),
-                "track[sharing]": "private",
+                "track[sharing]": "public",
                 "track[downloadable]": "false"
             }
         )
