@@ -189,9 +189,9 @@ def update_show_contentful(entry_id, name, sc_link, audio_file):
         print(f"Asset created with ID: {asset.sys['id']}")
 
         asset.process()
+        
         # TODO: Fix asset publishing, possibly have to wait for asset to finish
         # processing but asset.process() is not an async function.
-        time.sleep(10)  # Wait for asset to process
 
         print(f"Audio file uploaded and published as asset: {asset.sys['id']}")
 
@@ -206,9 +206,27 @@ def update_show_contentful(entry_id, name, sc_link, audio_file):
             }
         }
         entry.save()
-        
-        asset.publish()
+
+        # Wait for asset to finish processing. It will have a URL when it has.
+        # Will timeout after 240 seconds.
+        start_time = time.time()
+        while True:
+            newAsset = environment.assets().find(asset.sys['id'])
+            if 'file' in newAsset.fields() and 'url' in newAsset.fields()['file']:
+                print(f"Asset processed successfully.")
+                # Publish the asset
+                newAsset.publish()
+                break
+            elapsed_time = time.time() - start_time
+            if elapsed_time > 240:
+                raise TimeoutError("Asset processing timed out after 240 seconds.")
+                break
+            print("Waiting for asset to be processed...")
+            time.sleep(5)  # Wait for 5 seconds before checking again
+
+        # Publish the show
         entry.publish()
+
         print(f"SoundCloud link and audio file updated for entry ID {entry_id}.")
 
     except Exception as e:
@@ -216,6 +234,16 @@ def update_show_contentful(entry_id, name, sc_link, audio_file):
         send_error_to_slack(error_message)
         print(error_message)
 
+def find_asset_url():
+    client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
+    space = client.spaces().find(CONTENTFUL_SPACE_ID)
+    environment = space.environments().find(CONTENTFUL_ENV_ID)
+
+
+    asset = environment.assets().find("46Qi3spciOmdruadxGHtO5")
+    print(asset)
+    if 'file' in asset.fields() and 'url' in asset.fields()['file']:
+        print("YES WE HAVE A URL")
 
 def delete_repeat_from_contentful(entry_id):
     """Delete a show from contentful, used when its a repeat on the schedule."""
