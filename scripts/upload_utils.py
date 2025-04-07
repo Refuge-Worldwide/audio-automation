@@ -13,6 +13,7 @@ from error_handling import send_error_to_slack
 from supabase import create_client, Client 
 import json
 import base64
+import time
 
 dotenv_path = find_dotenv()
 load_dotenv(dotenv_path)
@@ -92,7 +93,7 @@ def get_soundcloud_token():
 
     return access_token
 
-def upload_to_soundcloud(audio_segment, show_metadata):
+def upload_to_soundcloud(audio_file, show_metadata):
     """Upload audio to SoundCloud."""
     import json
     def download_image(image_url):
@@ -108,11 +109,6 @@ def upload_to_soundcloud(audio_segment, show_metadata):
 
     #
     try:
-        # Convert the AudioSegment to a BytesIO object
-        audio_file = io.BytesIO()
-        audio_segment.export(audio_file, format="mp3", bitrate="192k")
-        audio_file.seek(0)  # Reset file pointer
-
         # Get the SoundCloud token
         token = get_soundcloud_token()
         print(f"Using token: {token}")
@@ -154,24 +150,119 @@ def upload_to_soundcloud(audio_segment, show_metadata):
         print(error_message)
         raise
 
-# Function to update the SoundCloud link for a show in Contentful
-def update_show_sc_link(entry_id, sc_link):
-    try: 
+# Function to update the SoundCloud link and audio file for a show in Contentful
+def update_show_contentful(entry_id, name, sc_link, audio_file):
+    try:
+        audio_file.seek(0)
+
+        client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
+        space = client.spaces().find(CONTENTFUL_SPACE_ID)
+        environment = space.environments().find(CONTENTFUL_ENV_ID)
+        
+        upload = space.uploads().create(audio_file)
+        print(f"File uploaded with ID: {upload.sys['id']}")
+
+        # Step 2: Create an asset and link the uploaded file
+        asset = environment.assets().create(
+            None,
+            {
+                "fields": {
+                    "title": {
+                        "en-US": name
+                    },
+                    "file": {
+                        "en-US": {
+                            "uploadFrom": {
+                                "sys": {
+                                    "type": "Link",
+                                    "linkType": "Upload",
+                                    "id": upload.sys['id']
+                                }
+                            },
+                            "fileName": f"{name}.mp3",
+                            "contentType": "audio/mpeg"
+                        }
+                    }
+                }
+            }
+        )
+        print(f"Asset created with ID: {asset.sys['id']}")
+
+        asset.process()
+        
+        # TODO: Fix asset publishing, possibly have to wait for asset to finish
+        # processing but asset.process() is not an async function.
+
+        print(f"Audio file uploaded and published as asset: {asset.sys['id']}")
+
+        # Step 2: Update the entry with the SoundCloud link and audio asset
+        entry = environment.entries().find(entry_id)
+        entry.fields('en-US')['mixcloudLink'] = sc_link
+        entry.fields('en-US')['audioFile'] = {
+            "sys": {
+                "type": "Link",
+                "linkType": "Asset",
+                "id": asset.sys['id']
+            }
+        }
+        entry.save()
+
+        # Wait for asset to finish processing. It will have a URL when it has.
+        # Will timeout after 240 seconds.
+        start_time = time.time()
+        while True:
+            newAsset = environment.assets().find(asset.sys['id'])
+            if 'file' in newAsset.fields() and 'url' in newAsset.fields()['file']:
+                print(f"Asset processed successfully.")
+                # Publish the asset
+                newAsset.publish()
+                break
+            elapsed_time = time.time() - start_time
+            if elapsed_time > 240:
+                raise TimeoutError("Asset processing timed out after 240 seconds.")
+                break
+            print("Waiting for asset to be processed...")
+            time.sleep(5)  # Wait for 5 seconds before checking again
+
+        # Publish the show
+        entry.publish()
+
+        print(f"SoundCloud link and audio file updated for entry ID {entry_id}.")
+
+    except Exception as e:
+        error_message = f"Error updating show {entry_id} with SoundCloud link and audio file: {str(e)}"
+        send_error_to_slack(error_message)
+        print(error_message)
+
+def find_asset_url():
+    client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
+    space = client.spaces().find(CONTENTFUL_SPACE_ID)
+    environment = space.environments().find(CONTENTFUL_ENV_ID)
+
+
+    asset = environment.assets().find("46Qi3spciOmdruadxGHtO5")
+    print(asset)
+    if 'file' in asset.fields() and 'url' in asset.fields()['file']:
+        print("YES WE HAVE A URL")
+
+def delete_repeat_from_contentful(entry_id):
+    """Delete a show from contentful, used when its a repeat on the schedule."""
+    try:
+        # Initialize the Contentful Management client
         client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
         space = client.spaces().find(CONTENTFUL_SPACE_ID)
         environment = space.environments().find(CONTENTFUL_ENV_ID)
 
+        # Find the show by ID
         entry = environment.entries().find(entry_id)
-        entry.fields('en-US')['mixcloudLink'] = sc_link
-        entry.save()
-        entry.publish()
-        print(f"SoundCloud link updated for entry ID {entry_id}.")
-    
-    except Exception as e:
-        error_message = f"Error updating show {entry_id} with SoundCloud link: {str(e)}"
-        send_error_to_slack(error_message)
-        print(error_message)
 
+        # Delete the show
+        entry.delete()
+        print(f"Entry with ID {entry_id} has been deleted successfully.")
+
+    except Exception as e:
+        error_message = f"Error deleting repeat show with ID {entry_id}: {str(e)}"
+        send_error_to_slack(error_message)
 
 def get_show_from_timestamp(timestamp):
     try:            
@@ -205,20 +296,6 @@ def fetch_show_details_from_contentful(timestamp):
         show_metadata["genres"] = show["genres"]
         return show_metadata
     return None, None, None
-
-def upload_to_soundcloud_with_metadata(audio_segment, timestamp):
-
-    show_metadata = fetch_show_details_from_contentful(timestamp)
-    if not show_metadata:
-        print(f"No metadata found for timestamp: {timestamp}")
-        return
-
-    # Upload to SoundCloud
-    sc_link = upload_to_soundcloud(audio_segment, show_metadata)
-    entry_id = show_metadata["entry_id"]
-    # Update Contentful entry with SoundCloud link
-    update_show_sc_link(entry_id, sc_link)
-    return sc_link
 
 def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     """Upload an audio file to Google Drive."""
