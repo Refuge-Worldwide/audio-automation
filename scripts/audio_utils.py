@@ -51,6 +51,7 @@ def format_time(ms):
 def process_audio_files(service, folder_id, start_jingle, end_jingle):
     """Process audio files from the given folder."""
     file_ids = get_file_ids_from_folder(service, folder_id)
+    PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
 
     for name, show_id in file_ids.items():
         file_extension = name.split('.')[-1].lower()
@@ -146,7 +147,6 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                 print(f"SoundCloud link: {sc_link}")
                 # Define the processed files folder ID (replace with actual ID)
-                PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
 
                 # Move the file after successful upload
                 move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
