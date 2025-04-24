@@ -121,7 +121,7 @@ def upload_to_soundcloud(audio_file, show_metadata):
             "https://api.soundcloud.com/tracks",
             headers={"Authorization": f"OAuth {token}"},
             files={
-                "track[asset_data]": (filename, audio_file, "audio/,mpeg"),
+                "track[asset_data]": (filename, audio_file, "audio/mpeg"),
                 "track[artwork_data]": ("artwork.png", image_data, "image/png")
                 },
             data={
