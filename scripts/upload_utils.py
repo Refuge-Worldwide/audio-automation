@@ -245,7 +245,7 @@ def find_asset_url():
     if 'file' in asset.fields() and 'url' in asset.fields()['file']:
         print("YES WE HAVE A URL")
 
-def delete_repeat_from_contentful(entry_id):
+def archive_repeat_from_contentful(entry_id):
     """Delete a show from contentful, used when its a repeat on the schedule."""
     try:
         # Initialize the Contentful Management client
@@ -255,6 +255,9 @@ def delete_repeat_from_contentful(entry_id):
 
         # Find the show by ID
         entry = environment.entries().find(entry_id)
+
+        # Unpublish the show, required so it can be deleted
+        entry.unpublish()
 
         # Delete the show
         entry.delete()
