@@ -294,7 +294,7 @@ def fetch_show_details_from_contentful(timestamp):
 
         show_metadata["entry_id"] = show["id"]
         show_metadata["title"] = final_title
-        show_metadata["description"] = "🌐 Refuge Worldwide is a radio station and community space based in Berlin-Neukölln.\n➡️ More info, more music: www.refugeworldwide.com\n\nSupport us by becoming a member on Patreon for just 3€ a month: www.patreon.com/refugeworldwide"
+        show_metadata["description"] = "🌐 Refuge Worldwide is a radio station and community space based in Berlin-Neukölln.\n➡️ More info, more music: www.refugeworldwide.com\n\nHelp us stay on air by donating to our fundraiser: https://www.gofundme.com/f/help-refuge-worldwide-community-radio"
         show_metadata["artwork"] = show["artwork"]
         show_metadata["genres"] = show["genres"]
         return show_metadata
