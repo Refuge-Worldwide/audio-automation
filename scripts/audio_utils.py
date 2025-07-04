@@ -35,6 +35,7 @@ def download_file(service, file_id):
     print(f"Downloaded file size: {file_size} bytes")
     end_time = time.time()
     print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
+    # TODO: Don't convert to audio segment if its a large file, instead throw error
     return AudioSegment.from_file(output)
 
 def get_file_ids_from_folder(service, folder_id):
