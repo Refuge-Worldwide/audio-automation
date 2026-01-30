@@ -2,46 +2,56 @@ from pydub import AudioSegment, silence
 import io
 import time
 import gc
+import requests
 from datetime import datetime, timedelta
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
-from upload_utils import move_file_to_folder, upload_to_soundcloud, fetch_show_details_from_contentful, update_show_contentful, delete_repeat_from_contentful   # Import from the upload script
+from kdrive_utils import get_kdrive_client, download_file_as_audio, get_file_ids_from_folder as kdrive_get_files, move_file_to_folder as kdrive_move_file
+from upload_utils import upload_to_soundcloud, fetch_show_details, update_show, delete_repeat_from_contentful
 from error_handling import send_error_to_slack
 import os
 from dotenv import load_dotenv
 
 load_dotenv()
 
-def download_file(service, file_id):
-    """Download a file by its ID and return as an AudioSegment."""
-
-    # TODO: Add error handling to this function. Perhaps a timeout for downloading.
+def download_file(file_id):
+    """Download a file by its ID from kDrive and return as an AudioSegment."""
     start_time = time.time()
-    request = service.files().get_media(fileId=file_id)
-    output = io.BytesIO()
-    downloader = MediaIoBaseDownload(output, request)
 
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-        print(f"Downloaded {int(status.progress() * 100)}%")
-        if done:
-            print("Download complete.")
-        else:
-            print("Downloading...")
+    # Use kDrive client to download
+    audio = download_file_as_audio(file_id)
 
-    output.seek(0)  # Ensure file pointer is at the beginning after download
-    file_size = len(output.getvalue())  # Get the size of the downloaded file
-    print(f"Downloaded file size: {file_size} bytes")
     end_time = time.time()
     print(f"Time taken to download file: {end_time - start_time:.2f} seconds")
-    # TODO: Don't convert to audio segment if its a large file, instead throw error
-    return AudioSegment.from_file(output)
+    return audio
 
-def get_file_ids_from_folder(service, folder_id):
-    query = f"'{folder_id}' in parents"
-    response = service.files().list(q=query).execute()
-    return {file['name']: file['id'] for file in response.get('files', [])}
+def download_file_from_url(url):
+    """Download an audio file from a URL and return as an AudioSegment."""
+    start_time = time.time()
+
+    print(f"Downloading file from URL: {url}")
+    response = requests.get(url, stream=True)
+
+    if response.status_code != 200:
+        raise Exception(f"Failed to download file from URL: {response.status_code}")
+
+    # Read content into BytesIO
+    file_data = io.BytesIO()
+    for chunk in response.iter_content(chunk_size=8192):
+        if chunk:
+            file_data.write(chunk)
+
+    file_data.seek(0)
+
+    # Determine audio format from URL
+    file_extension = url.split('.')[-1].split('?')[0].lower()  # Handle query params
+    if file_extension not in ['mp3', 'wav', 'flac', 'ogg', 'm4a']:
+        file_extension = 'mp3'  # Default to mp3
+
+    print(f"Converting to AudioSegment (format: {file_extension})...")
+    audio = AudioSegment.from_file(file_data, format=file_extension)
+
+    end_time = time.time()
+    print(f"Time taken to download and process file: {end_time - start_time:.2f} seconds")
+    return audio
 
 def format_time(ms):
     seconds = ms // 1000
@@ -49,18 +59,36 @@ def format_time(ms):
     hours = minutes // 60
     return f"{hours:02}:{minutes % 60:02}:{seconds % 60:02}"
 
-def process_audio_files(service, folder_id, start_jingle, end_jingle):
-    """Process audio files from the given folder."""
-    file_ids = get_file_ids_from_folder(service, folder_id)
-    PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
+def process_audio_files(folder_id, start_jingle, end_jingle):
+    """Process audio files from the given kDrive folder."""
+    files = kdrive_get_files(folder_id)
+    PROCESSED_FOLDER_ID = int(os.getenv("KDRIVE_BACKUP_FOLDER_ID"))
 
-    for name, show_id in file_ids.items():
-        file_extension = name.split('.')[-1].lower()
+    for file_info in files:
+        file_id = file_info['id']
+        filename = file_info['name']
+        file_extension = filename.split('.')[-1].lower()
+        
         if file_extension in ('wav', 'mp3'):
             try:
                 start_time = time.time()
-                date_str = name[:8]  # Extract "YYYYMMDD"
-                time_str = name[9:13]  # Extract "HHMM"
+                
+                # Extract timestamp from filename (format: YYYYMMDD-HHMM or YYYYMMDD_HHMM)
+                # Remove file extension first
+                name_without_ext = filename.rsplit('.', 1)[0]
+                
+                # Check if filename follows expected format (YYYYMMDD-HHMM or YYYYMMDD_HHMM)
+                if len(name_without_ext) < 13 or not name_without_ext[:8].isdigit():
+                    print(f"Skipping {filename} - filename doesn't match expected format YYYYMMDD-HHMM or YYYYMMDD_HHMM")
+                    continue
+                
+                # Handle both dash and underscore separators
+                if name_without_ext[8] in ['-', '_']:
+                    date_str = name_without_ext[:8]  # Extract "YYYYMMDD"
+                    time_str = name_without_ext[9:13]  # Extract "HHMM"
+                else:
+                    print(f"Skipping {filename} - invalid separator at position 8")
+                    continue
 
                 # Convert to datetime object
                 date_time = datetime.strptime(f"{date_str} {time_str}", "%Y%m%d %H%M")
@@ -68,24 +96,32 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                 # Add 15 minutes to the datetime object
                 date_time += timedelta(minutes=15)
 
-                # Format as "YYYYMMDDTHH15"
-                timestamp = date_time.strftime("%Y%m%dT%H%M")
-                show = download_file(service, show_id)
+                # Format as "YYYYMMDD-HHMM"
+                timestamp = date_time.strftime("%Y%m%d-%H%M")
+                print(f"Processing file: {filename}")
+                print(f"Timestamp: {timestamp}")
+                show = download_file(file_id)
 
                 # If show length is short then don't process
-                if len(show) < 1800000: 
-                    print("Not processing show as its too small")
-                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
-                    continue
-                
+                # if len(show) < 1800000:
+                #     print("Not processing show as its too small")
+                #     kdrive_move_file(show_id, PROCESSED_FOLDER_ID)
+                #     continue
+
                 # Fetch metadata about show based on timestamp
-                show_metadata = fetch_show_details_from_contentful(timestamp)
+                show_metadata = fetch_show_details(timestamp)
+
+                # If no show metadata found, skip this file and move to processed folder
+                if not show_metadata:
+                    print(f"No show metadata found for timestamp {timestamp}, skipping file and moving to processed folder")
+                    kdrive_move_file(file_id, PROCESSED_FOLDER_ID)
+                    continue
 
                 # If the show is a repeat then delete from contentful and don't process
                 if "(r)" in show_metadata['title']:
                     print("Deleting show as its a repeat")
                     delete_repeat_from_contentful(show_metadata["entry_id"])
-                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+                    kdrive_move_file(file_id, PROCESSED_FOLDER_ID)
                     continue
 
                 print("beginning to process audio")
@@ -111,21 +147,29 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                 # Concatenate the segments to form the final audio without long silences
                 trimmed_show = sum(segments, AudioSegment.silent(duration=0))
 
-                start_jingle_end = start_jingle[-5800:].fade_out(5800)
-                trimmed_start = trimmed_show[:5800].fade_in(5800)
-                blended_start = start_jingle_end.overlay(trimmed_start)
+                # Get the length of the start jingle
+                jingle_length = len(start_jingle)
+                print(f"Start jingle length: {jingle_length} ms ({jingle_length / 1000:.2f} seconds)")
 
-                end_jingle_start = end_jingle[:7200].fade_in(7200)
-                trimmed_end = trimmed_show[-7200:].fade_out(7200)
-                blended_end = trimmed_end.overlay(end_jingle_start)
+                # Combine start jingle with the show - no blending, just concatenate
+                if end_jingle is not None:
+                    # Legacy behavior: add end jingle
+                    end_jingle_start = end_jingle[:7200].fade_in(7200)
+                    trimmed_end = trimmed_show[-7200:].fade_out(7200)
+                    blended_end = trimmed_end.overlay(end_jingle_start)
 
-                final_output = (
-                    start_jingle[:-5800] +
-                    blended_start +
-                    trimmed_show[5800:-7200] +
-                    blended_end +
-                    end_jingle[7200:]
-                )
+                    final_output = (
+                        start_jingle +
+                        trimmed_show[:-7200] +
+                        blended_end +
+                        end_jingle[7200:]
+                    )
+                else:
+                    # No end jingle: just add start jingle and fade out the end
+                    final_output = (
+                        start_jingle +
+                        trimmed_show.fade_out(2000)  # Fade out last 2 seconds
+                    )
 
                 print("finished processing audio")
 
@@ -140,22 +184,21 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                 # Upload to soundcloud
                 sc_link = upload_to_soundcloud(audio_file, show_metadata)
-                
-                # Update show on contentful. Uploading audio file and updating soundcloud link
+
+                # Update show on CMS (Contentful or Kirby). Uploading audio file and updating soundcloud link
                 entry_id = show_metadata["entry_id"]
                 entry_title = show_metadata["title"]
-                update_show_contentful(entry_id, entry_title, sc_link, audio_file)
+                update_show(entry_id, entry_title, sc_link, audio_file)
 
                 print(f"SoundCloud link: {sc_link}")
-                # Define the processed files folder ID (replace with actual ID)
 
                 # Move the file after successful upload
-                move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+                kdrive_move_file(file_id, PROCESSED_FOLDER_ID)
 
                 del show, trimmed_show, final_output, audio_file
                 gc.collect()
             except Exception as e:
-                error_message = f"Error processing audio {name}: {e}"
+                error_message = f"Error processing audio {filename}: {e}"
                 send_error_to_slack(error_message)
                 print(error_message)
                 
@@ -163,4 +206,4 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
                 continue
 
             end_time = time.time()
-            print(f"Processed {name} in {end_time - start_time:.2f} seconds")
+            print(f"Processed {filename} in {end_time - start_time:.2f} seconds")

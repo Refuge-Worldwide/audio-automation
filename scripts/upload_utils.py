@@ -11,6 +11,7 @@ import contentful_management
 import requests
 from error_handling import send_error_to_slack
 from supabase import create_client, Client 
+from kirby_utils import get_episode_by_timestamp
 import json
 import base64
 import time
@@ -46,11 +47,22 @@ def get_drive_service():
 def get_soundcloud_token():
     """Retrieve a valid SoundCloud OAuth token, refreshing if expired."""
 
-    # Retrieve the access token, refresh token and expiration time from supbase
-    response = supabase.from_("accessTokens").select("*").eq("application", "soundcloud").single().execute()
-    access_token = response.data["token"]
-    refresh_token = response.data["refresh_token"]
-    expires_at = response.data["expires"]
+    # Retrieve the access token, refresh token and expiration time from supabase
+    try:
+        response = supabase.from_("accessTokens").select("*").eq("application", "soundcloud").execute()
+        
+        if not response.data or len(response.data) == 0:
+            raise Exception("No SoundCloud token found in Supabase. Please run sc_token_insert.py first to initialize tokens.")
+        
+        token_data = response.data[0]
+        access_token = token_data["token"]
+        refresh_token = token_data["refresh_token"]
+        expires_at = token_data["expires"]
+    except Exception as e:
+        error_message = f"Failed to retrieve SoundCloud token from Supabase: {e}"
+        print(error_message)
+        send_error_to_slack(error_message)
+        raise
 
     #convert expiration time to datetime object
     expires_at_date_object = datetime.strptime(expires_at, "%Y-%m-%dT%H:%M:%S%z")
@@ -59,10 +71,20 @@ def get_soundcloud_token():
     if datetime.now(timezone.utc) >= expires_at_date_object:
         print("Access token expired, refreshing...")
         refresh_url = "https://secure.soundcloud.com/oauth/token"
+        
+        client_id = os.getenv("SC_CLIENT_ID") or os.getenv("SOUNDCLOUD_CLIENT_ID")
+        client_secret = os.getenv("SC_CLIENT_SECRET") or os.getenv("SOUNDCLOUD_CLIENT_SECRET")
+        
+        if not client_id or not client_secret:
+            error_message = "SC_CLIENT_ID and SC_CLIENT_SECRET environment variables are required"
+            print(error_message)
+            send_error_to_slack(error_message)
+            return None
+        
         data = {
             "grant_type": "refresh_token",
-            "client_id": os.getenv("SC_CLIENT_ID"),
-            "client_secret": os.getenv("SC_CLIENT_SECRET"),
+            "client_id": client_id,
+            "client_secret": client_secret,
             "refresh_token": refresh_token
         }
         response = requests.post(refresh_url, data=data)
@@ -86,7 +108,7 @@ def get_soundcloud_token():
             print(f"New access token obtained: {access_token}")
             print(f"New refresh token obtained: {refresh_token}")
         else:
-            error_message = "Failed to refresh access token"
+            error_message = f"Failed to refresh access token: {response.status_code} - {response.text}"
             print(error_message)
             send_error_to_slack(error_message)
             return None
@@ -101,11 +123,29 @@ def upload_to_soundcloud(audio_file, show_metadata):
         response.raise_for_status()  # Raise an exception if the image download fails
         return response.content  # Return the raw image data
 
-    # Image URL from Contentful show data
-    image_url = "https:" + show_metadata["artwork"]
+    # Image URL from show metadata
+    image_url = show_metadata.get("artwork", "")
+    
+    # Handle artwork URL - add https: if it's a protocol-relative URL
+    # Skip artwork if running on localhost since SoundCloud can't access it
+    if image_url:
+        if "localhost" in image_url or image_url.startswith("/"):
+            print("Warning: Artwork is on localhost, skipping (SoundCloud can't access local files)")
+            image_url = None
+        elif image_url.startswith("//"):
+            image_url = "https:" + image_url
+        elif not image_url.startswith("http"):
+            print(f"Warning: Invalid artwork URL: {image_url}, skipping artwork")
+            image_url = None
 
-    # Download the image
-    image_data = download_image(image_url)
+    # Download the image if we have a valid URL
+    image_data = None
+    if image_url:
+        try:
+            image_data = download_image(image_url)
+        except Exception as e:
+            print(f"Warning: Failed to download artwork: {e}, continuing without artwork")
+            image_data = None
 
     #
     try:
@@ -113,22 +153,28 @@ def upload_to_soundcloud(audio_file, show_metadata):
         token = get_soundcloud_token()
         print(f"Using token: {token}")
 
-        # Create the filename with the show name and title
-        filename = f"{show_metadata['title']}.mp3"
+        # Create the filename with current timestamp
+        current_time = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{current_time}.mp3"
+
+        # Prepare files dict - only include artwork if we have image data
+        files_dict = {
+            "track[asset_data]": (filename, audio_file, "audio/mpeg")
+        }
+        
+        if image_data:
+            files_dict["track[artwork_data]"] = ("artwork.png", image_data, "image/png")
 
         # Send the POST request to SoundCloud with the token in the Authorization header
         response = requests.post(
             "https://api.soundcloud.com/tracks",
             headers={"Authorization": f"OAuth {token}"},
-            files={
-                "track[asset_data]": (filename, audio_file, "audio/mpeg"),
-                "track[artwork_data]": ("artwork.png", image_data, "image/png")
-                },
+            files=files_dict,
             data={
                 "track[title]": show_metadata["title"],
                 "track[description]": show_metadata["description"],
-                "track[tag_list]": " ".join([f"\"{genre}\"" for genre in show_metadata["genres"]]),
-                "track[sharing]": "public",
+                "track[tag_list]": " ".join([f"\"{genre}\"" for genre in show_metadata.get("genres", [])]),
+                "track[sharing]": "private",
                 "track[downloadable]": "false"
             }
         )
@@ -151,13 +197,58 @@ def upload_to_soundcloud(audio_file, show_metadata):
         raise
 
 # Function to update the SoundCloud link and audio file for a show in Contentful
-def update_show_contentful(entry_id, name, sc_link, audio_file):
+def update_show(entry_id, name, sc_link, audio_file):
+    """
+    Update show entry with SoundCloud link and audio file.
+    Routes to appropriate CMS based on CMS_TYPE environment variable.
+    
+    Args:
+        entry_id: The ID/slug of the show entry
+        name: Title of the show
+        sc_link: URL of the uploaded SoundCloud track
+        audio_file: BytesIO object containing the audio file
+    """
+    cms_type = os.getenv('CMS_TYPE', 'kirby').lower()
+    
+    if cms_type == 'kirby':
+        _update_kirby_show(entry_id, sc_link)
+    elif cms_type == 'contentful':
+        _update_contentful_show(entry_id, name, sc_link, audio_file)
+    else:
+        print(f"Warning: Unsupported CMS_TYPE: {cms_type}. Skipping CMS update.")
+
+
+def _update_kirby_show(entry_id, sc_link):
+    """Update show in Kirby CMS with SoundCloud link."""
+    from kirby_utils import update_episode
+    
+    try:
+        update_episode(
+            episode_id=entry_id,
+            soundcloud_url=sc_link
+        )
+        print(f"Updated Kirby CMS for episode: {entry_id}")
+    except Exception as e:
+        print(f"Failed to update Kirby CMS: {e}")
+        # Don't fail the entire process if Kirby update fails
+
+
+def _update_contentful_show(entry_id, name, sc_link, audio_file):
+    """Update show in Contentful CMS with SoundCloud link and audio file."""
+    space_id = os.getenv('CONTENTFUL_SPACE_ID')
+    environment_id = os.getenv('CONTENTFUL_ENVIRONMENT', 'master')
+    token = os.getenv('CONTENTFUL_TOKEN')
+    
+    if not all([space_id, token]):
+        print("Warning: Contentful credentials not configured. Skipping Contentful update.")
+        return
+    
     try:
         audio_file.seek(0)
 
-        client = contentful_management.Client(CONTENTFUL_MANAGEMENT_API_TOKEN)
-        space = client.spaces().find(CONTENTFUL_SPACE_ID)
-        environment = space.environments().find(CONTENTFUL_ENV_ID)
+        client = contentful_management.Client(token)
+        space = client.spaces().find(space_id)
+        environment = space.environments().find(environment_id)
         
         upload = space.uploads().create(audio_file)
         print(f"File uploaded with ID: {upload.sys['id']}")
@@ -269,9 +360,16 @@ def delete_repeat_from_contentful(entry_id):
 
 def get_show_from_timestamp(timestamp):
     try:            
-        api_key = os.getenv('WEBSITE_API_KEY')
-        headers = {'Authorization': f'Bearer {api_key}'}
-        response = requests.get(f"https://refugeworldwide.com/api/shows/by-timestamp?t={timestamp}", headers=headers)
+        api_url = os.getenv('WEBSITE_API_URL')
+        if not api_url:
+            raise ValueError("WEBSITE_API_URL environment variable is not set")
+        
+        # Ensure the URL ends with the correct endpoint
+        base_url = api_url.rstrip('/')
+        if not base_url.endswith('/api/episode-by-timestamp'):
+            base_url = base_url.replace('/api/episode-by-timestamp', '') + '/api/episode-by-timestamp'
+        
+        response = requests.get(f"{base_url}?t={timestamp}")
         response.raise_for_status()  # Raise an exception for HTTP errors
         show = response.json()  # Parse the JSON response
         return show
@@ -282,23 +380,116 @@ def get_show_from_timestamp(timestamp):
         return None
 
     
-def fetch_show_details_from_contentful(timestamp):
-    show = get_show_from_timestamp(timestamp)
+def fetch_show_details(timestamp):
+    """
+    Fetch show details from CMS (Contentful or Kirby) by timestamp.
+    
+    Args:
+        timestamp: Timestamp in format YYYYMMDD-HHMM
+        
+    Returns:
+        Dictionary with show metadata or None if not found
+    """
+    cms_type = os.getenv('CMS_TYPE', 'kirby').lower()
+    
+    if cms_type == 'kirby':
+        return _fetch_show_from_kirby(timestamp)
+    elif cms_type == 'contentful':
+        return _fetch_show_from_contentful(timestamp)
+    else:
+        raise ValueError(f"Unsupported CMS_TYPE: {cms_type}. Use 'contentful' or 'kirby'")
+
+
+def _fetch_show_from_kirby(timestamp):
+    """Fetch show details from Kirby CMS."""
+    show = get_episode_by_timestamp(timestamp)
+    
+    if not show:
+        error_message = f"No show found for timestamp {timestamp}"
+        print(error_message)
+        send_error_to_slack(error_message)
+        return None
+    
     show_metadata = {}
-    if show:
-        show = show[0]
+    
+    try:
+        date_obj = datetime.strptime(timestamp, "%Y%m%d-%H%M")
+        formatted_date = date_obj.strftime("%d %b %Y")
+
+        # Parse title - handle both "show | artist" and plain title formats
+        # Ensure title is a string (handle None case)
+        title = show.get("title") or ""
+        if " | " in title:
+            show_name, artists = title.split(" | ", 1)
+            final_title = f"{show_name} - {artists} - {formatted_date}"
+        else:
+            final_title = f"{title} - {formatted_date}" if title else f"Unknown Show - {formatted_date}"
+
+        show_metadata["entry_id"] = show.get("id") or show.get("slug", "")
+        show_metadata["slug"] = show.get("slug", "")
+        show_metadata["title"] = final_title
+
+        # Get description from Kirby API and append website URL
+        kirby_description = show.get("description") or ""
+        show_metadata["description"] = f"{kirby_description}\n\nhttps://transition-radio.com/" if kirby_description else "https://transition-radio.com/"
+
+        show_metadata["artwork"] = show.get("artwork") or ""
+        show_metadata["genres"] = show.get("genres") or []
+
+        return show_metadata
+
+    except Exception as e:
+        error_message = f"Error parsing show metadata for timestamp {timestamp}: {e}"
+        print(error_message)
+        send_error_to_slack(error_message)
+        return None
+
+
+def _fetch_show_from_contentful(timestamp):
+    """Fetch show details from Contentful CMS."""
+    space_id = os.getenv('CONTENTFUL_SPACE_ID')
+    environment_id = os.getenv('CONTENTFUL_ENVIRONMENT', 'master')
+    token = os.getenv('CONTENTFUL_TOKEN')
+    
+    if not all([space_id, token]):
+        raise ValueError("Contentful credentials not configured. Set CONTENTFUL_SPACE_ID and CONTENTFUL_TOKEN.")
+    
+    try:
+        client = contentful_management.Client(token)
+        # Query entries by timestamp - adjust field name based on your content model
+        entries = client.entries(space_id, environment_id).all({
+            'content_type': 'show',
+            'fields.timestamp': timestamp
+        })
+        
+        if not entries or len(entries) == 0:
+            error_message = f"No show found for timestamp {timestamp} in Contentful"
+            print(error_message)
+            send_error_to_slack(error_message)
+            return None
+        
+        show = entries[0]
         date_obj = datetime.strptime(timestamp, "%Y%m%dT%H%M")
         formatted_date = date_obj.strftime("%d %b %Y")
-        show_name, artists = show["title"].split(" | ")
-        final_title = f"{show_name} - {artists} - {formatted_date}"
-
-        show_metadata["entry_id"] = show["id"]
-        show_metadata["title"] = final_title
-        show_metadata["description"] = "🌐 Refuge Worldwide is a radio station and community space based in Berlin-Neukölln.\n➡️ More info, more music: www.refugeworldwide.com\n\nHelp us stay on air by donating to our fundraiser: https://www.gofundme.com/f/help-refuge-worldwide-community-radio"
-        show_metadata["artwork"] = show["artwork"]
-        show_metadata["genres"] = show["genres"]
+        
+        title = show.title if hasattr(show, 'title') else 'Unknown Show'
+        
+        show_metadata = {
+            "entry_id": show.id,
+            "slug": show.slug if hasattr(show, 'slug') else show.id,
+            "title": f"{title} - {formatted_date}",
+            "description": show.description if hasattr(show, 'description') else "",
+            "artwork": show.artwork if hasattr(show, 'artwork') else "",
+            "genres": show.genres if hasattr(show, 'genres') else []
+        }
+        
         return show_metadata
-    return None, None, None
+        
+    except Exception as e:
+        error_message = f"Error fetching from Contentful for timestamp {timestamp}: {e}"
+        print(error_message)
+        send_error_to_slack(error_message)
+        return None
 
 def upload_to_drive(service, audio_segment, filename, folder_id, timestamp):
     """Upload an audio file to Google Drive."""
