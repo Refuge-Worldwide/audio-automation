@@ -32,14 +32,11 @@ def main():
 
         # kDrive folder IDs
         input_folder_id = os.getenv('KDRIVE_INPUT_FOLDER_ID')
-        output_folder_id = os.getenv('KDRIVE_OUTPUT_FOLDER_ID')
 
-        if not input_folder_id or not output_folder_id:
-            raise ValueError("Ensure KDRIVE_INPUT_FOLDER_ID and KDRIVE_OUTPUT_FOLDER_ID are set in environment variables.")
+        if not input_folder_id:
+            raise ValueError("Ensure KDRIVE_INPUT_FOLDER_ID is set in environment variables.")
 
-        # Convert folder IDs to integers
         input_folder_id = int(input_folder_id)
-        output_folder_id = int(output_folder_id)
 
         # Load start jingle from kDrive
         start_jingle_id = os.getenv('KDRIVE_START_JINGLE_ID')

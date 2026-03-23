@@ -230,7 +230,7 @@ def _update_kirby_show(entry_id, sc_link):
         print(f"Updated Kirby CMS for episode: {entry_id}")
     except Exception as e:
         print(f"Failed to update Kirby CMS: {e}")
-        # Don't fail the entire process if Kirby update fails
+        raise
 
 
 def _update_contentful_show(entry_id, name, sc_link, audio_file):
