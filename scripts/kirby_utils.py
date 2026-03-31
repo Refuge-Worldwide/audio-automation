@@ -108,8 +108,8 @@ def update_episode(episode_id, soundcloud_url):
             "soundcloud_url": soundcloud_url
         }
 
-        # Make the POST request to update the episode
-        response = requests.post(
+        # Make the PATCH request to update the episode
+        response = requests.patch(
             url,
             json=payload,
             headers=_get_kirby_headers(),
