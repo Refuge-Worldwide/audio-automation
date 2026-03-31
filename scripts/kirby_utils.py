@@ -100,7 +100,7 @@ def update_episode(episode_id, soundcloud_url):
 
     try:
         # Construct the API endpoint
-        url = f"{KIRBY_BASE_URL.rstrip('/')}/api/episodes/update"
+        url = f"{KIRBY_BASE_URL.rstrip('/')}/api/update-episode"
 
         # Prepare the update payload with ID in body
         payload = {
