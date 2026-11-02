@@ -83,8 +83,7 @@ def get_soundcloud_token():
             }
             response = supabase.from_("accessTokens").update(data).eq("application", "soundcloud").execute()
         
-            print(f"New access token obtained: {access_token}")
-            print(f"New refresh token obtained: {refresh_token}")
+            print("New SoundCloud tokens obtained")
         else:
             error_message = "Failed to refresh access token"
             print(error_message)
@@ -111,7 +110,6 @@ def upload_to_soundcloud(audio_file, show_metadata):
     try:
         # Get the SoundCloud token
         token = get_soundcloud_token()
-        print(f"Using token: {token}")
 
         # Create the filename with the show name and title
         filename = f"{show_metadata['title']}.mp3"
@@ -289,12 +287,16 @@ def fetch_show_details_from_contentful(timestamp):
         show = show[0]
         date_obj = datetime.strptime(timestamp, "%Y%m%dT%H%M")
         formatted_date = date_obj.strftime("%d %b %Y")
-        show_name, artists = show["title"].split(" | ")
-        final_title = f"{show_name} - {artists} - {formatted_date}"
+        title_parts = show["title"].split(" | ", 1)
+        if len(title_parts) == 2:
+            show_name, artists = title_parts
+            final_title = f"{show_name} - {artists} - {formatted_date}"
+        else:
+            final_title = f"{title_parts[0]} - {formatted_date}"
 
         show_metadata["entry_id"] = show["id"]
         show_metadata["title"] = final_title
-        show_metadata["description"] = "🌐 Refuge Worldwide is a radio station and community space based in Berlin-Neukölln.\n➡️ More info, more music: www.refugeworldwide.com\n\nHelp us stay on air by donating to our fundraiser: https://www.gofundme.com/f/help-refuge-worldwide-community-radio"
+        show_metadata["description"] = "🌐 Refuge Worldwide is a radio station and community space based in Berlin-Neukölln.\n📲 Get our new App / become a supporter: https://refugeworldwide.com/support\n📌 More info, more music: www.refugeworldwide.com"
         show_metadata["artwork"] = show["artwork"]
         show_metadata["genres"] = show["genres"]
         return show_metadata

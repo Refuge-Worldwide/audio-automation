@@ -12,6 +12,9 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# 3 hours at 320kbps (320,000 / 8 * 10,800 seconds)
+MAX_FILE_SIZE_BYTES = 432_000_000
+
 def download_file(service, file_id):
     """Download a file by its ID and return as an AudioSegment."""
 
@@ -40,8 +43,8 @@ def download_file(service, file_id):
 
 def get_file_ids_from_folder(service, folder_id):
     query = f"'{folder_id}' in parents"
-    response = service.files().list(q=query).execute()
-    return {file['name']: file['id'] for file in response.get('files', [])}
+    response = service.files().list(q=query, fields="files(id, name, size)").execute()
+    return {file['name']: (file['id'], int(file.get('size', 0))) for file in response.get('files', [])}
 
 def format_time(ms):
     seconds = ms // 1000
@@ -54,7 +57,7 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
     file_ids = get_file_ids_from_folder(service, folder_id)
     PROCESSED_FOLDER_ID = os.getenv("BACKUP_FOLDER_ID")
 
-    for name, show_id in file_ids.items():
+    for name, (show_id, file_size) in file_ids.items():
         file_extension = name.split('.')[-1].lower()
         if file_extension in ('wav', 'mp3'):
             try:
@@ -70,6 +73,13 @@ def process_audio_files(service, folder_id, start_jingle, end_jingle):
 
                 # Format as "YYYYMMDDTHH15"
                 timestamp = date_time.strftime("%Y%m%dT%H%M")
+
+                # If show is too long then don't download it, flag it so it can be handled manually
+                if file_size > MAX_FILE_SIZE_BYTES:
+                    send_error_to_slack(f"Not processing {name} as it's longer than 3 hours")
+                    move_file_to_folder(service, show_id, PROCESSED_FOLDER_ID)
+                    continue
+
                 show = download_file(service, show_id)
 
                 # If show length is short then don't process
